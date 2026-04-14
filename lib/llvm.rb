@@ -5,6 +5,19 @@ require 'ffi'
 
 module LLVM
   require 'llvm/version'
+
+  # On Windows (RubyInstaller2), register the LLVM lib directory in the DLL
+  # search path so that FFI can find libLLVM-*.dll at runtime.
+  # See https://github.com/oneclick/rubyinstaller2/wiki/For-gem-developers#dll-loading
+  if Gem.win_platform?
+    begin
+      require 'ruby_installer/runtime'
+      RubyInstaller::Runtime.add_dll_directory(LLVM::CONFIG::LIBDIR)
+    rescue LoadError
+      # Not running under RubyInstaller — rely on PATH or standard DLL resolution.
+    end
+  end
+
   require 'llvm/support'
 
   class DeprecationError < StandardError; end

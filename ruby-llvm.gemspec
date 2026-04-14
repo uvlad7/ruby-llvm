@@ -37,4 +37,7 @@ Gem::Specification.new do |s|
   s.add_development_dependency 'tapioca', '~> 0.16.11'
   s.add_development_dependency 'yard', '~> 0.9'
   s.metadata['rubygems_mfa_required'] = 'true'
+  # Uncomment it if you want llvm to be installed automatically via pacman.
+  # I'd personally prefer to keep the behavior consistent with other OSes
+  # s.metadata['msys2_mingw_dependencies'] = 'llvm'
 end

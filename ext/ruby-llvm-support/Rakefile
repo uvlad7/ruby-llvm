@@ -55,6 +55,23 @@ def invoke_llvm_config(options)
   `#{LLVM_CONFIG} #{options}`.tr("\n", ' ').strip
 end
 
+# Detect Windows platform (native Ruby on Windows, e.g. RubyInstaller with MSYS2/MinGW)
+def windows?
+  Gem.win_platform?
+end
+
+# Translate an MSYS2/Cygwin Unix-style path to a Windows path using cygpath.
+# On MSYS2, paths like /ucrt64/include need to be converted to
+# C:/Ruby33-x64/msys64/ucrt64/include so the compiler can find them.
+# Falls back to the raw path if cygpath is not available.
+def msys_path(path)
+  return path unless windows?
+
+  `cygpath -w #{path}`.chomp
+rescue Errno::ENOENT
+  path
+end
+
 # llvm_lib_name
 # Are there any builds where invoke_llvm_config('--libs') will not be sufficient and manual search would still be
 # needed?
@@ -76,12 +93,51 @@ desc 'Build the shared library and config module'
 task default: [SUPPORT_LIB, CONFIG_MOD]
 
 file SUPPORT_LIB => %w[support.cpp] do |task|
-  sh "#{CXX} -O3 -shared #{task.prerequisites.join(' ')} " \
-     "#{invoke_llvm_config('--libs --cxxflags --ldflags')} -fPIC -o #{SUPPORT_LIB}"
+  if windows?
+    # On Windows (MSYS2/MinGW via RubyInstaller), llvm-config --cxxflags returns
+    # include paths that may be incorrect for the actual compiler environment
+    # (e.g., -I/usr/include instead of -I/ucrt64/include). We explicitly query
+    # --includedir and --libdir to get the correct paths, then translate them
+    # from MSYS2 Unix-style paths to Windows paths that the compiler understands.
+
+    include_dir = msys_path(invoke_llvm_config('--includedir').strip)
+    lib_dir = msys_path(invoke_llvm_config('--libdir').strip)
+
+    # Get cxxflags but strip out any existing -I and -L flags (we supply our own)
+    cxxflags = invoke_llvm_config('--cxxflags')
+                   .gsub(/-I\S+/, '')
+                   .gsub(/-L\S+/, '')
+                   .strip
+
+    libs = invoke_llvm_config('--libs').strip
+
+    # Get ldflags but strip out any existing -L flags (we supply our own)
+    ldflags = invoke_llvm_config('--ldflags')
+                   .gsub(/-L\S+/, '')
+                   .strip
+
+    flags = [
+      "#{CXX} -O3 -shared",
+      task.prerequisites.join(' '),
+      "-I#{include_dir}",
+      cxxflags,
+      "-L#{lib_dir}",
+      libs,
+      ldflags,
+      "-o #{SUPPORT_LIB}"
+    ].join(' ')
+
+    sh flags
+  else
+    sh "#{CXX} -O3 -shared #{task.prerequisites.join(' ')} " \
+       "#{invoke_llvm_config('--libs --cxxflags --ldflags')} -fPIC -o #{SUPPORT_LIB}"
+  end
 end
 
 LLVM_CONFIG_OPTS = [
   ['VERSION',      :string, '--version'],
+  ['INCLUDEDIR',   :string, '--includedir'],
+  ['LIBDIR',       :string, '--libdir'],
   ['COMPONENTS',    :array,  '--components'],
   ['TARGETS_BUILT', :array,  '--targets-built'],
   ['HOST_TARGET',   :string, '--host-target'],

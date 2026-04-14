@@ -53,6 +53,7 @@ task :generate_ffi do
         "libLLVM-#{LLVM::LLVM_VERSION}.so.1",
         "libLLVM.so.#{LLVM::LLVM_VERSION}",
         "LLVM-#{LLVM::LLVM_VERSION}",
+        "libLLVM-#{LLVM::LLVM_VERSION}.dll",
       ],
       headers:     headers.map { |header| "llvm-c/#{header}" },
       cflags:      LLVM::CONFIG::CFLAGS.split(/\s/),
