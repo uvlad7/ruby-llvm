@@ -70,3 +70,50 @@ jobs:
       - name: "Typecheck"
         run: bundle exec srb tc
         if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true'
+
+  test-windows:
+    name: "Windows ${{ matrix.arch }}"
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: windows-2022
+            msystem: ucrt64
+            pkg-prefix: ucrt64
+            arch: x64
+          - runs-on: windows-2025
+            msystem: ucrt64
+            pkg-prefix: ucrt64
+            arch: x64
+          - runs-on: windows-11-arm
+            msystem: clangarm64
+            pkg-prefix: clangarm64
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            mingw-w64-${{ matrix.pkg-prefix }}-llvm
+            mingw-w64-${{ matrix.pkg-prefix }}-gcc
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: Build support library
+        run: cd ext/ruby-llvm-support && bundle exec rake
+
+      - name: Run tests
+        run: bundle exec rake
+
+      - name: Run samples
+        run: bundle exec rake test:samples
