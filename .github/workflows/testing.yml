@@ -101,7 +101,7 @@ jobs:
       - name: Set up MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: ${{ matrix.msystem }}
+          msystem: ${{ matrix.platform.msystem }}
           update: true
           install: >-
             llvm
