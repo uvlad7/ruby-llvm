@@ -94,19 +94,14 @@ jobs:
             pkg-prefix: clangarm64
             arch: arm64
     steps:
+      - name: Install LLVM on windows
+        id: win_setup
+        run: |
+          pacman --sync --refresh --needed --noconfirm llvm
       - uses: actions/checkout@v4
-
-      - name: Set up MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          update: true
-          install: >-
-            mingw-w64-${{ matrix.pkg-prefix }}-llvm
-            mingw-w64-${{ matrix.pkg-prefix }}-gcc
-
       - uses: ruby/setup-ruby@v1
         with:
+          ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
 
       - name: Build support library
