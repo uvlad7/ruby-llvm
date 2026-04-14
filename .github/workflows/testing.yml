@@ -72,27 +72,30 @@ jobs:
         if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true'
 
   test-windows:
-    name: "Windows ${{ matrix.arch }}"
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: ${{ matrix.platform.runs-on }}
     defaults:
       run:
         shell: msys2 {0}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        ruby: ['3.1', '3.2', '3.3', '3.4']
+        platform:
           - runs-on: windows-2022
             msystem: ucrt64
-            pkg-prefix: ucrt64
+            pkg-prefix: ucrt-x86_64
             arch: x64
+            compiler: gcc
           - runs-on: windows-2025
             msystem: ucrt64
-            pkg-prefix: ucrt64
+            pkg-prefix: ucrt-x86_64
             arch: x64
+            compiler: gcc
           - runs-on: windows-11-arm
             msystem: clangarm64
-            pkg-prefix: clangarm64
+            pkg-prefix: clang-aarch64
             arch: arm64
+            compiler: gcc-compat
     steps:
 
       - name: Set up MSYS2
