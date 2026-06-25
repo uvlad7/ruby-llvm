@@ -70,7 +70,9 @@ jobs:
           location: 'C:\msys64'
 
       - shell: cmd
-        run: msys2 -c 'echo $SHELL'
+        run: |
+          where msys2
+          msys2 -c 'echo $SHELL'
 
       - name: Install LLVM on windows
         id: windows_setup
@@ -87,7 +89,7 @@ jobs:
           # has installed a gcc/toolchain into this runner's C:\msys64 environment
           # yet, so there's no already-installed gcc-libs to conflict with llvm's
           # dependency on it.
-          msys2 -lc 'pacman -Sy --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
+          C:\msys64\usr\bin\bash.exe -lc 'pacman -Sy --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
           Add-Content -Path $env:GITHUB_PATH -Value $msys2_bin
           Add-Content -Path $env:GITHUB_ENV -Value "RUBY_DLL_PATH=$msys2_bin"
           # On x86-64 the runner ships an MSVC clang++.exe that find_cxx would
