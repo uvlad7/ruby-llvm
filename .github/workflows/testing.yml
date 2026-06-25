@@ -90,16 +90,23 @@ jobs:
       - name: Diagnose windows LLVM toolchain
         if: startsWith(matrix.os, 'windows')
         run: |
-          $ruby_topdir = ruby -e "print RbConfig::TOPDIR"
-          $bin = Join-Path $ruby_topdir "msys64\$($env:MSYSTEM.ToLower())\bin"
+          # RbConfig::TOPDIR is unreliable on Ruby 3.1: its frozen rbconfig
+          # bakes in the build-time path (D:\a\_temp\rubyinstaller-...), not
+          # the actual hostedtoolcache install location. Derive the root from
+          # the running ruby.exe's own path instead.
+          $ruby_exe = (Get-Command ruby).Source
+          $ruby_root = Split-Path (Split-Path $ruby_exe -Parent) -Parent
+          $msys_root = Join-Path $ruby_root "msys64"
+          $bin = Join-Path $msys_root "$($env:MSYSTEM.ToLower())\bin"
+          Write-Host "ruby_exe=$ruby_exe"
           Write-Host "MSYSTEM=$env:MSYSTEM"
-          Write-Host "PATH=$env:PATH"
           Write-Host "Looking in $bin"
-          Get-ChildItem $bin -Filter 'llvm-config*' -ErrorAction SilentlyContinue
+          Get-ChildItem $bin -Filter '*llvm*' -ErrorAction SilentlyContinue
           Get-Command llvm-config -ErrorAction SilentlyContinue
-      - name: Debug session
-        if: contains(matrix.os, 'intel')
-        uses: mxschmitt/action-tmate@v3
+          & "$msys_root\usr\bin\pacman.exe" -Q "$($env:MINGW_PACKAGE_PREFIX)-llvm"
+      # - name: Debug session
+      #   if: contains(matrix.os, 'intel')
+      #   uses: mxschmitt/action-tmate@v3
       - run: cd ext/ruby-llvm-support && bundle exec rake
         name: "Build support library"
         if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true' || steps.windows_setup.outputs.setup == 'true'
