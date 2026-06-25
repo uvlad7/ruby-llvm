@@ -76,6 +76,7 @@ jobs:
           # tree to register via AddDllDirectory. Without it, libLLVM-*.dll is not
           # found because RubyInstaller uses safe DLL search (not PATH) on Windows.
           Add-Content -Path $env:GITHUB_ENV -Value "MSYSTEM=UCRT64"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUBY_DLL_PATH=C:\msys64\ucrt64\bin"
           # The runner has its own clang++.exe on PATH (MSVC-targeted, bundled
           # with Visual Studio's Clang component) that find_cxx's plain
           # "clang++" check would otherwise pick over MinGW g++ -- it passes
@@ -95,6 +96,11 @@ jobs:
           bundler-cache: true
           bundler: latest
           rubygems: latest
+
+      - name: Debug session
+        if: steps.windows_setup.outputs.setup == 'true'
+        uses: mxschmitt/action-tmate@v3
+
       - run: cd ext/ruby-llvm-support && bundle exec rake
         name: "Build support library"
         if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true' || steps.windows_setup.outputs.setup == 'true'
