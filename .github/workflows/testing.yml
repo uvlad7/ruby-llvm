@@ -58,6 +58,12 @@ jobs:
           sudo ./llvm.sh 22
           # sudo apt-get install -y libpolly-22-dev
           echo "setup=true" >> "$GITHUB_OUTPUT"
+      - name: Install MSYS2 on windows-arm
+        if: matrix.os == 'windows-11-arm'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANGARM64
+          update: false
       - name: Install LLVM on windows
         id: windows_setup
         if: startsWith(matrix.os, 'windows')
