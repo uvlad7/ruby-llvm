@@ -88,6 +88,19 @@ jobs:
           bundler-cache: true
           bundler: latest
           rubygems: latest
+
+      - name: Diagnose windows LLVM toolchain
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          $msystem = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'clangarm64' } else { 'ucrt64' }
+          $bin = Join-Path $env:RUNNER_TEMP "msys64\$msystem\bin"
+          Write-Host "PATH=$env:PATH"
+          Write-Host "Looking in $bin"
+          Get-ChildItem $bin -Filter 'llvm-config*' -ErrorAction SilentlyContinue
+          Get-Command llvm-config -ErrorAction SilentlyContinue
+      - name: Debug session
+        if: contains(matrix.os, 'intel')
+        uses: mxschmitt/action-tmate@v3
       - run: cd ext/ruby-llvm-support && bundle exec rake
         name: "Build support library"
         if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true' || steps.windows_setup.outputs.setup == 'true'
