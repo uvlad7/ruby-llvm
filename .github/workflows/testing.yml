@@ -42,7 +42,7 @@ jobs:
           brew link --force llvm@22
           echo "setup=true" >> "$GITHUB_OUTPUT"
       - name: 'MacOS debug'
-        if: steps.macos_setup.setup == 'false'
+        if: steps.macos_setup.outputs.setup == 'false'
         run: |
           echo $(brew --repository)
           echo $(brew --prefix llvm@22)
@@ -61,35 +61,14 @@ jobs:
           sudo ./llvm.sh 22
           # sudo apt-get install -y libpolly-22-dev
           echo "setup=true" >> "$GITHUB_OUTPUT"
-      - name: Install MSYS2 on windows-arm
-        if: matrix.os == 'windows-11-arm'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: CLANGARM64
-          update: false
-
-      - name: Install LLVM on windows
+      - name: Configure windows build env
         id: windows_setup
         if: startsWith(matrix.os, 'windows')
         run: |
+          # ruby/setup-ruby reads msys2_mingw_dependencies from the gemspec and
+          # installs LLVM into its own managed MSYS2 toolchain tree before running
+          # bundle install, so no separate MSYS2/pacman setup is needed here.
           echo "setup=false" >> $env:GITHUB_OUTPUT
-          # ARM64 runners use CLANGARM64 (no GCC toolchain); x86-64 uses UCRT64.
-          if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
-            $env:MSYSTEM = 'CLANGARM64'
-            # On ARM the setup-msys2 action installs to its own temp dir (no pre-installed
-            # C:\msys64); detect the root via cygpath so RUBY_DLL_PATH matches where
-            # pacman actually puts the DLLs.
-            $msys2_root = (msys2 -lc 'cygpath -w /').Trim().TrimEnd('\')
-            $msys2_bin = "$msys2_root\clangarm64\bin"
-            # -Sy (sync only), not -Syu
-            msys2 -lc 'pacman -Sy --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
-          } else {
-            $env:MSYSTEM = 'UCRT64'
-            $msys2_bin = "C:\msys64\ucrt64\bin"
-            C:\msys64\usr\bin\bash.exe -lc 'pacman -Sy --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
-          }
-          Add-Content -Path $env:GITHUB_PATH -Value $msys2_bin
-          Add-Content -Path $env:GITHUB_ENV -Value "RUBY_DLL_PATH=$msys2_bin"
           # On x86-64 the runner ships an MSVC clang++.exe that find_cxx would
           # pick over MinGW g++ (passes --version but rejects -fPIC). Force g++
           # since no MSVC g++ exists to shadow it. On ARM64 leave CXX unset and
