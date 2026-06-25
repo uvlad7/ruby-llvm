@@ -63,23 +63,26 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         run: |
           echo "setup=false" >> $env:GITHUB_OUTPUT
-          $env:MSYSTEM = "UCRT64"
+          # ARM64 runners use CLANGARM64 (no GCC toolchain); x86-64 uses UCRT64.
+          $msystem = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'CLANGARM64' } else { 'UCRT64' }
+          $msys2_bin = "C:\msys64\$($msystem.ToLower())\bin"
+          $env:MSYSTEM = $msystem
           # -Sy (sync only), not -Syu: a full -u here risks pacman replacing
           # msys2-runtime's own DLL out from under this running shell mid-step,
           # with no second pass to recover. Safe to skip -u because nothing
-          # has installed a gcc/toolchain into this runner's C:\msys64 ucrt64
-          # environment yet, so there's no already-installed gcc-libs to
-          # conflict with llvm's dependency on it.
+          # has installed a gcc/toolchain into this runner's C:\msys64 environment
+          # yet, so there's no already-installed gcc-libs to conflict with llvm's
+          # dependency on it.
           C:\msys64\usr\bin\bash.exe -lc 'pacman -Sy --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\msys64\ucrt64\bin"
-          Add-Content -Path $env:GITHUB_ENV -Value "RUBY_DLL_PATH=C:\msys64\ucrt64\bin"
-          # The runner has its own clang++.exe on PATH (MSVC-targeted, bundled
-          # with Visual Studio's Clang component) that find_cxx's plain
-          # "clang++" check would otherwise pick over MinGW g++ -- it passes
-          # the --version check but rejects -fPIC since MSVC/PE-COFF targets
-          # don't use it. We didn't install MSYS2's own clang package, so
-          # force g++ explicitly instead of relying on fallback ordering.
-          Add-Content -Path $env:GITHUB_ENV -Value "CXX=g++"
+          Add-Content -Path $env:GITHUB_PATH -Value $msys2_bin
+          Add-Content -Path $env:GITHUB_ENV -Value "RUBY_DLL_PATH=$msys2_bin"
+          # On x86-64 the runner ships an MSVC clang++.exe that find_cxx would
+          # pick over MinGW g++ (passes --version but rejects -fPIC). Force g++
+          # since no MSVC g++ exists to shadow it. On ARM64 leave CXX unset and
+          # let find_cxx resolve the CLANGARM64 toolchain naturally.
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'ARM64') {
+            Add-Content -Path $env:GITHUB_ENV -Value "CXX=g++"
+          }
           # MSYS2 installs the rolling 'opt.exe', not the versioned 'opt-22.exe'
           Add-Content -Path $env:GITHUB_ENV -Value "OPT=opt"
           echo "setup=true" >> $env:GITHUB_OUTPUT
