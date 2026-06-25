@@ -17,8 +17,24 @@ jobs:
         include:
           - os: windows-11-arm
             ruby: '3.4'
-    continue-on-error: true
+        exclude:
+          # Ruby 3.1's MSYS2 archive comes with gcc already installed, pinned to gcc-libs=14.2.0-3:
+          #   error: failed to prepare transaction (could not satisfy dependencies)
+          # :: installing mingw-w64-ucrt-x86_64-gcc-libs (16.1.0-5) breaks
+          #     dependency 'mingw-w64-ucrt-x86_64-gcc-libs=14.2.0-3' required by mingw-w64-ucrt-x86_64-gcc
+          - os: windows-2022
+            ruby: '3.1'
+          - os: windows-2025
+            ruby: '3.1'
+    continue-on-error: ${{ endsWith(matrix.ruby, 'head') || matrix.ruby == 'debug' }}
     steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          bundler: latest
+          rubygems: latest
       - name: Install LLVM on macos
         if: startsWith(matrix.os, 'macos')
         id: macos_setup
@@ -59,19 +75,17 @@ jobs:
           sudo ./llvm.sh 22
           # sudo apt-get install -y libpolly-22-dev
           echo "setup=true" >> "$GITHUB_OUTPUT"
-      - name: Configure windows build env
+      - name: Install LLVM on windows
         id: windows_setup
         if: startsWith(matrix.os, 'windows')
         run: |
-          # LLVM itself is installed below via ruby/setup-ruby-pkgs' `mingw:`
-          # input, which runs pacman against the SAME MSYS2 tree ruby/setup-ruby
-          # already manages (found on PATH), so there's no separate MSYS2 install
-          # or second tree to get out of sync with the one the build links against.
-          # ruby-llvm.gemspec's msys2_mingw_dependencies metadata is for real `gem
-          # install`s (where RubyInstaller2's Gem.pre_install hook fires); it's
-          # inert here because this repo's own gemspec is a Bundler path/git
-          # dependency, which never goes through Gem::Installer.
           echo "setup=false" >> $env:GITHUB_OUTPUT
+          # ridk exec resolves the correct MSYS2 root + MSYSTEM (UCRT64 on
+          # x86-64, CLANGARM64 on windows-11-arm) for whichever Ruby
+          # ruby/setup-ruby just installed, and runs pacman against that SAME
+          # tree — no separate MSYS2 install, so no second tree to get out of
+          # sync with the one the build actually links against.
+          ridk exec sh -c 'pacman -Sy --noconfirm --noprogressbar --needed --disable-download-timeout $MINGW_PACKAGE_PREFIX-llvm'
           # On x86-64 the runner ships an MSVC clang++.exe that find_cxx would
           # pick over MinGW g++ (passes --version but rejects -fPIC). Force g++
           # since no MSVC g++ exists to shadow it. On ARM64 leave CXX unset and
@@ -82,20 +96,12 @@ jobs:
           # MSYS2 installs the rolling 'opt.exe', not the versioned 'opt-22.exe'
           Add-Content -Path $env:GITHUB_ENV -Value "OPT=opt"
           echo "setup=true" >> $env:GITHUB_OUTPUT
-      - uses: actions/checkout@v4
-        if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true' || steps.windows_setup.outputs.setup == 'true'
-      - uses: ruby/setup-ruby-pkgs@v1.33.5
-        if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true' || steps.windows_setup.outputs.setup == 'true'
-        with:
-          ruby-version: ${{ matrix.ruby }}
-          bundler-cache: true
-          bundler: latest
-          rubygems: latest
-          # No-op on macos/ubuntu (those install LLVM themselves above); on
-          # windows this runs pacman against ruby/setup-ruby's own managed
-          # MSYS2 tree (UCRT64 or, on windows-11-arm, CLANGARM64) after Ruby
-          # is set up but before bundle install.
-          mingw: llvm
+      - name: 'Windows debug'
+        if: steps.windows_setup.outputs.setup == 'false'
+        run: |
+          ridk exec sh -c 'echo MSYSTEM=$MSYSTEM; pacman -Q $MINGW_PACKAGE_PREFIX-llvm; llvm-config --bindir --libdir --ldflags; ls -l $(llvm-config --bindir)/libLLVM*; ls -l $(llvm-config --libdir)/libLLVM-22.*'
+          echo "$env:PATH"
+          Get-Command llvm-config -ErrorAction SilentlyContinue
       # - name: Debug session
       #   if: contains(matrix.os, 'intel')
       #   uses: mxschmitt/action-tmate@v3
