@@ -95,6 +95,9 @@ jobs:
           bundler-cache: true
           bundler: latest
           rubygems: latest
+      - name: Debug session
+        if: matrix.os == 'windows-11-arm'
+        uses: mxschmitt/action-tmate@v3
       - run: cd ext/ruby-llvm-support && bundle exec rake
         name: "Build support library"
         if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true' || steps.windows_setup.outputs.setup == 'true'
