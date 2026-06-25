@@ -69,12 +69,14 @@ jobs:
           update: false
           location: 'C:\msys64'
 
+      - shell: cmd
+        run: msys2 -c 'echo $SHELL'
+
       - name: Install LLVM on windows
         id: windows_setup
         if: startsWith(matrix.os, 'windows')
         run: |
           echo "setup=false" >> $env:GITHUB_OUTPUT
-          tree C:\msys64
           # ARM64 runners use CLANGARM64 (no GCC toolchain); x86-64 uses UCRT64.
           $msystem = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'CLANGARM64' } else { 'UCRT64' }
           $msys2_bin = "C:\msys64\$($msystem.ToLower())\bin"
@@ -85,7 +87,7 @@ jobs:
           # has installed a gcc/toolchain into this runner's C:\msys64 environment
           # yet, so there's no already-installed gcc-libs to conflict with llvm's
           # dependency on it.
-          C:\msys64\usr\bin\bash.exe -lc 'pacman -Sy --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
+          msys2 -lc 'pacman -Sy --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
           Add-Content -Path $env:GITHUB_PATH -Value $msys2_bin
           Add-Content -Path $env:GITHUB_ENV -Value "RUBY_DLL_PATH=$msys2_bin"
           # On x86-64 the runner ships an MSVC clang++.exe that find_cxx would
