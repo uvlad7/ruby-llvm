@@ -63,7 +63,7 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         run: |
           echo "setup=false" >> $env:GITHUB_OUTPUT
-          # $env:MSYSTEM = "UCRT64"
+          $env:MSYSTEM = "UCRT64"
           # -Sy (sync only), not -Syu: a full -u here risks pacman replacing
           # msys2-runtime's own DLL out from under this running shell mid-step,
           # with no second pass to recover. Safe to skip -u because nothing
