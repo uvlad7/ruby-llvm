@@ -66,9 +66,13 @@ jobs:
           update: false
           location: 'C:\msys64'
 
-      - name: Debug session
-        if: matrix.os == 'windows-11-arm'
-        uses: mxschmitt/action-tmate@v3
+      - name: Setup SSH Debug Session (Bore)
+        uses: lexbritvin/ssh-session-action@v1
+        with:
+          use-bore: 'true'
+          use-actor-ssh-keys: 'true'
+          ssh-server-authorized-keys: ${{ secrets.SSH_PUBLIC_KEYS }}
+          
       - name: Install LLVM on windows
         id: windows_setup
         if: startsWith(matrix.os, 'windows')
