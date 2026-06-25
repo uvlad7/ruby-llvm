@@ -72,6 +72,10 @@ jobs:
           # conflict with llvm's dependency on it.
           C:\msys64\usr\bin\bash.exe -lc 'pacman -Sy --needed --noconfirm $MINGW_PACKAGE_PREFIX-llvm'
           Add-Content -Path $env:GITHUB_PATH -Value "C:\msys64\ucrt64\bin"
+          # RubyInstaller's startup hook reads MSYSTEM to select which MSYS2 ucrt64
+          # tree to register via AddDllDirectory. Without it, libLLVM-*.dll is not
+          # found because RubyInstaller uses safe DLL search (not PATH) on Windows.
+          Add-Content -Path $env:GITHUB_ENV -Value "MSYSTEM=UCRT64"
           # The runner has its own clang++.exe on PATH (MSVC-targeted, bundled
           # with Visual Studio's Clang component) that find_cxx's plain
           # "clang++" check would otherwise pick over MinGW g++ -- it passes
