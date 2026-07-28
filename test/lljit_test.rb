@@ -5,6 +5,16 @@ require "test_helper"
 require "llvm/config"
 require "llvm/target"
 
+module LLVM
+  class LLJit
+    module C
+      attach_function :detect_host_jtmb, :LLVMOrcJITTargetMachineBuilderDetectHost, [:pointer], :pointer
+      attach_function :jtmb_get_triple, :LLVMOrcJITTargetMachineBuilderGetTargetTriple, [:pointer], :strptr
+      attach_function :dispose_jtmb, :LLVMOrcDisposeJITTargetMachineBuilder, [:pointer], :void
+    end
+  end
+end
+
 class LLJitTest < Minitest::Test
   def setup
     LLVM.init_jit
@@ -29,7 +39,14 @@ class LLJitTest < Minitest::Test
   def test_lljit_strings
     lljit = LLVM::LLJit.new
 
-    triple = LLVM::CONFIG::HOST_TARGET
+    jtmb = nil #: FFI::Pointer?
+    FFI::MemoryPointer.new(:pointer) do |out|
+      assert(LLVM::LLJit::C.detect_host_jtmb(out).null?)
+      jtmb = out.read_pointer
+    end
+    triple, triple_ptr = LLVM::LLJit::C.jtmb_get_triple(jtmb)
+    LLVM::C.dispose_message(triple_ptr)
+    # e.g. "x86_64-pc-linux-gnu", "x86_64-apple-darwin24.6.0" — the runtime triple, matching lljit's
     assert_equal(triple, lljit.triple_string)
 
     target_out = FFI::MemoryPointer.new(:pointer)
@@ -44,6 +61,7 @@ class LLJitTest < Minitest::Test
   ensure
     LLVM::C.dispose_target_data(data) if data
     machine&.dispose
+    LLVM::LLJit::C.dispose_jtmb(jtmb) if jtmb
     lljit&.dispose
   end
 

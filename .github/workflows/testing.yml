@@ -9,10 +9,6 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    # sorbet-static has no Windows or riscv64 build, so skip the :typecheck group there (srb tc
-    # is likewise skipped for both below). x86_64/arm64 Linux and macOS install it and typecheck.
-    env:
-      BUNDLE_WITHOUT: ${{ (startsWith(matrix.os, 'windows') || contains(matrix.os, '-riscv')) && 'typecheck' || '' }}
     # How to set up a riscv runner:
     # https://github.com/uvlad7/ffi-llvm-jit/blob/9b21d00d5f63afeae0e676477094e34f4d6ee88a/.github/workflows/main.yml#L142
     strategy:
@@ -23,8 +19,14 @@ jobs:
         include:
           - os: windows-11-arm
             ruby: '3.4'
+          - os: windows-11-arm
+            ruby: '4.0'
           - os: windows-2025
             ruby: ruby-mswin
+          - os: windows-2025
+            ruby: ruby-mingw
+          - os: windows-2025
+            ruby: ruby-ucrt
         exclude:
           # Ruby 3.1's MSYS2 archive comes with gcc already installed, pinned to gcc-libs=14.2.0-3:
           #   error: failed to prepare transaction (could not satisfy dependencies)
@@ -34,7 +36,7 @@ jobs:
             ruby: '3.1'
           - os: windows-2025
             ruby: '3.1'
-    continue-on-error: ${{ endsWith(matrix.ruby, 'head') || matrix.ruby == 'debug' || matrix.ruby == 'ruby-mswin' }}
+    continue-on-error: ${{ endsWith(matrix.ruby, 'head') || matrix.ruby == 'debug' || startsWith(matrix.ruby, 'ruby-') }}
     steps:
       - uses: actions/checkout@v4
       # ruby/setup-ruby has no riscv64 prebuilts, so build Ruby with ruby-build and cache it in
@@ -95,6 +97,8 @@ jobs:
           # ffi's dlopen checks DYLD_LIBRARY_PATH before its hardcoded dirs:
           # https://github.com/ffi/ffi/blob/master/lib/ffi/dynamic_library.rb#L33
           echo "DYLD_LIBRARY_PATH=$(brew --prefix llvm@22)/lib" >> "$GITHUB_ENV"
+          # Homebrew ships the rolling 'opt', not the versioned 'opt-22' pass_builder_test defaults to.
+          echo "OPT=opt" >> "$GITHUB_ENV"
           echo "setup=true" >> "$GITHUB_OUTPUT"
       - name: 'MacOS debug'
         if: startsWith(matrix.os, 'macos') && (steps.macos_setup.outputs.setup == 'false' || runner.debug == '1')
