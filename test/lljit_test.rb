@@ -41,7 +41,7 @@ class LLJitTest < Minitest::Test
 
     jtmb = nil #: FFI::Pointer?
     FFI::MemoryPointer.new(:pointer) do |out|
-      assert(LLVM::LLJit::C.detect_host_jtmb(out).null?)
+      assert_predicate(LLVM::LLJit::C.detect_host_jtmb(out), :null?)
       jtmb = out.read_pointer
     end
     triple, triple_ptr = LLVM::LLJit::C.jtmb_get_triple(jtmb)

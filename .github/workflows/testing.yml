@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, ubuntu-26.04-riscv, macos-14, macos-15, macos-15-intel, windows-2022, windows-2025]
+        # TODO: temporary — ubuntu-24.04-riscv to check runner pickup; restore ubuntu-26.04-riscv (needs llvm-22).
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, ubuntu-24.04-riscv, macos-14, macos-15, macos-15-intel, windows-2022, windows-2025]
         ruby: ['3.1', '3.2', '3.3', '3.4', '4.0']
         include:
           - os: windows-11-arm
@@ -161,6 +162,10 @@ jobs:
             if ($env:PROCESSOR_ARCHITECTURE -ne 'ARM64') {
               Add-Content -Path $env:GITHUB_ENV -Value "CXX=g++"
             }
+            # libLLVM-22.dll sits in llvm-config's bindir; put that dir on PATH so ffi_lib can load
+            # it at test time. Some MSYS2 trees (e.g. the ruby-mingw head build) don't have it there.
+            $llvmbin = ridk exec sh -c "cygpath -w `$(llvm-config --bindir)"
+            Add-Content -Path $env:GITHUB_PATH -Value $llvmbin
           }
           # MSYS2/llvm-project release both install the rolling 'opt.exe', not the versioned 'opt-22.exe'
           Add-Content -Path $env:GITHUB_ENV -Value "OPT=opt"
