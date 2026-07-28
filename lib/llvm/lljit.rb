@@ -43,7 +43,7 @@ module LLVM
     # Look up a compiled symbol by name; returns its address as an Integer.
     # LLVMOrcExecutorAddress is uint64_t (upper bits zero on 32-bit targets).
     def function_address(name)
-      address = nil
+      address = nil #: Integer?
       FFI::MemoryPointer.new(:uint64) do |out|
         raise_if_error(C.lookup(@ptr, out, name))
         address = out.read_uint64

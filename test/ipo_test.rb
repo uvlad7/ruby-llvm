@@ -14,19 +14,8 @@ class IPOTestCase < Minitest::Test
   def test_gdce
     mod = LLVM::Module.new('test')
 
-    fn1 = mod.functions.add("fn1", [], LLVM.Void) do |fn|
-      fn.linkage = :internal
-      fn.basic_blocks.append.build do |builder|
-        builder.ret_void
-      end
-    end
-
-    fn2 = mod.functions.add("fn2", [], LLVM.Void) do |fn|
-      fn.linkage = :internal
-      fn.basic_blocks.append.build do |builder|
-        builder.ret_void
-      end
-    end
+    fn1 = add_internal_void_fn(mod, "fn1")
+    fn2 = add_internal_void_fn(mod, "fn2")
 
     main = mod.functions.add("main", [], LLVM.Void) do |fn|
       fn.basic_blocks.append.build do |builder|
@@ -53,5 +42,12 @@ class IPOTestCase < Minitest::Test
     assert_includes fns, main
   ensure
     engine&.dispose
+  end
+
+  def add_internal_void_fn(mod, name)
+    mod.functions.add(name, [], LLVM.Void) do |fn|
+      fn.linkage = :internal
+      fn.basic_blocks.append.build(&:ret_void)
+    end
   end
 end

@@ -114,11 +114,8 @@ def define_invalid_function(host_module, function_name, argument_types, return_t
   function
 end
 
-# Make a libc/libm symbol resolvable by JIT'd code (MCJIT, or LLJIT's process generator). Most
-# libc funcs auto-resolve, but libm (e.g. sin) isn't in MCJIT's default search, so register from
-# wherever the symbol lives. i386 COFF (Windows/Cygwin) mangles names with a leading '_'.
-def register_jit_symbol(name)
-  ptr = nil
+# Find a libc/libm symbol's address, trying libc then libm. Returns nil if not found.
+def jit_symbol_pointer(name)
   [FFI::Library::LIBC, 'm'].each do |lib|
     dl = begin
       FFI::DynamicLibrary.send(:load_library, lib, nil)
@@ -126,8 +123,16 @@ def register_jit_symbol(name)
       next
     end
     ptr = dl.find_function(name)
-    break if ptr
+    return ptr if ptr
   end
+  nil
+end
+
+# Make a libc/libm symbol resolvable by JIT'd code (MCJIT, or LLJIT's process generator). Most
+# libc funcs auto-resolve, but libm (e.g. sin) isn't in MCJIT's default search, so register from
+# wherever the symbol lives. i386 COFF (Windows/Cygwin) mangles names with a leading '_'.
+def register_jit_symbol(name)
+  ptr = jit_symbol_pointer(name)
   return unless ptr
 
   i386_coff = FFI::Platform::ADDRESS_SIZE == 32 && (FFI::Platform::IS_WINDOWS || FFI::Platform::OS == 'cygwin')
