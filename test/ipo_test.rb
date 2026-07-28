@@ -51,5 +51,7 @@ class IPOTestCase < Minitest::Test
     assert_includes fns, fn1
     refute_includes fns, fn2, 'fn2 should be eliminated'
     assert_includes fns, main
+  ensure
+    engine&.dispose
   end
 end

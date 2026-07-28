@@ -38,6 +38,7 @@ end
 
 require "llvm/core"
 require "llvm/execution_engine"
+require "llvm/lljit"
 
 class Minitest::Test
   LLVM_SIGNED = true
@@ -113,28 +114,53 @@ def define_invalid_function(host_module, function_name, argument_types, return_t
   function
 end
 
-# i386 mangles C symbols with a leading underscore, so register libc symbols as _name for the
-# JIT to resolve. No-op elsewhere (64-bit / Unix auto-resolve). 32-bit Cygwin untested.
-def register_libc_symbol_for_jit(name)
-  return unless FFI::Platform::ADDRESS_SIZE == 32 && (FFI::Platform::IS_WINDOWS || FFI::Platform::OS == 'cygwin')
+# Make a libc/libm symbol resolvable by JIT'd code (MCJIT, or LLJIT's process generator). Most
+# libc funcs auto-resolve, but libm (e.g. sin) isn't in MCJIT's default search, so register from
+# wherever the symbol lives. i386 COFF (Windows/Cygwin) mangles names with a leading '_'.
+def register_jit_symbol(name)
+  ptr = nil
+  [FFI::Library::LIBC, 'm'].each do |lib|
+    dl = begin
+      FFI::DynamicLibrary.send(:load_library, lib, nil)
+    rescue LoadError
+      next
+    end
+    ptr = dl.find_function(name)
+    break if ptr
+  end
+  return unless ptr
 
-  ptr = FFI::DynamicLibrary.open(FFI::Library::LIBC, FFI::DynamicLibrary::RTLD_LAZY).find_function(name)
-  LLVM::C.add_symbol("_#{name}", ptr) if ptr
+  i386_coff = FFI::Platform::ADDRESS_SIZE == 32 && (FFI::Platform::IS_WINDOWS || FFI::Platform::OS == 'cygwin')
+  LLVM::C.add_symbol(i386_coff ? "_#{name}" : name, ptr)
 end
 
-def run_function_on_module(host_module, function_name, *argument_values)
+# Build a JIT engine with host_module added. MCJIT is the default (works everywhere, incl. i386
+# where JITLink has no backend); on riscv MCJIT/RuntimeDyld mis-relocates globals (upstream LLVM
+# bug), so use LLJIT/ORC there. Both respond to #run_function(fun, *args) and #dispose.
+def jit_engine_for(host_module)
   # i386 codegen assumes a 16-byte-aligned stack, but Ruby calls in 4-byte aligned, so JIT'd
   # functions that call out crash; make each realign its own stack. Real callers own this.
   if FFI::Platform::ADDRESS_SIZE == 32 && (FFI::Platform::IS_WINDOWS || FFI::Platform::OS == 'cygwin')
     stackrealign = LLVM::Attribute.string("stackrealign", "")
     host_module.functions.each { |fn| fn.add_attribute(stackrealign) }
   end
-  LLVM::MCJITCompiler
-    .new(host_module)
-    .run_function(
-      host_module.functions[function_name],
-      *argument_values #: as untyped
-    )
+  if FFI::Platform::ARCH.to_s.start_with?('riscv')
+    engine = LLVM::LLJit.new
+    engine.add_module(host_module)
+    engine
+  else
+    LLVM::MCJITCompiler.new(host_module)
+  end
+end
+
+def run_function_on_module(host_module, function_name, *argument_values)
+  engine = jit_engine_for(host_module)
+  engine.run_function(
+    host_module.functions[function_name],
+    *argument_values #: as untyped
+  )
+ensure
+  engine&.dispose
 end
 
 def run_function(argument_types, argument_values, return_type, &block)

@@ -1,5 +1,6 @@
 require 'llvm/core'
 require 'llvm/execution_engine'
+require 'llvm/lljit'
 require 'llvm/transforms/scalar'
 require "benchmark"
 
@@ -47,7 +48,13 @@ if FFI::Platform::ADDRESS_SIZE == 32 && (FFI::Platform::IS_WINDOWS || FFI::Platf
   mod.functions.each { |f| f.add_attribute(LLVM::Attribute.string('stackrealign', '')) }
 end
 
-engine = LLVM::JITCompiler.new(mod)
+# MCJIT everywhere; LLJIT on riscv, where MCJIT/RuntimeDyld mis-relocates globals.
+if FFI::Platform::ARCH.to_s.start_with?('riscv')
+  engine = LLVM::LLJit.new
+  engine.add_module(mod)
+else
+  engine = LLVM::JITCompiler.new(mod)
+end
 
 def rec_factorial(n)
   if n <= 1

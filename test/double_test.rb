@@ -88,15 +88,23 @@ class DoubleTestCase < Minitest::Test
       builder.ret(builder.fadd(p0, LLVM::Double(1.0)))
     end
 
-    engine = LLVM::MCJITCompiler.new(mod)
+    # sin is in libm, which MCJIT doesn't auto-resolve; register it before running.
+    register_jit_symbol("sin")
+    engine = jit_engine_for(mod)
 
     arg = 5.0
     result = engine.run_function(mod.functions["test"], arg)
     assert_equal arg + 1, result&.to_f(LLVM::Double)
 
-    skip 'MCJIT cannot find external function sin'
-
-    assert actual = engine.run_function(mod.functions["sin"], 1.0)&.to_f(LLVM::Double)
+    if engine.is_a?(LLVM::LLJit)
+      actual = engine.run_function(mod.functions["sin"], 1.0)&.to_f(LLVM::Double)
+    else
+      ptr = engine.pointer_to_global(mod.functions["sin"])
+      actual = FFI::Function.new(:double, [:double], ptr).call(1.0)
+    end
+    assert actual
     assert_in_delta(Math.sin(1.0), actual, 1e-10)
+  ensure
+    engine&.dispose
   end
 end

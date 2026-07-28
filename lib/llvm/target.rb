@@ -285,7 +285,7 @@ module LLVM
 
     # Destroys this instance of TargetDataLayout.
     def dispose
-      return if ptr.nil?
+      return if @ptr.nil?
 
       C.dispose_target_data(self)
       @ptr = nil

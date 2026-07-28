@@ -1,5 +1,6 @@
 require 'llvm/core'
 require 'llvm/execution_engine'
+require 'llvm/lljit'
 require 'llvm/transforms/scalar'
 
 # must initialize the jit
@@ -51,5 +52,11 @@ if FFI::Platform::ADDRESS_SIZE == 32 && (FFI::Platform::IS_WINDOWS || FFI::Platf
   mod.functions.each { |f| f.add_attribute(LLVM::Attribute.string('stackrealign', '')) }
 end
 
-jit = LLVM::JITCompiler.new(mod)
+# MCJIT everywhere; LLJIT on riscv, where MCJIT/RuntimeDyld mis-relocates globals.
+if FFI::Platform::ARCH.to_s.start_with?('riscv')
+  jit = LLVM::LLJit.new
+  jit.add_module(mod)
+else
+  jit = LLVM::JITCompiler.new(mod)
+end
 puts jit.run_function(mod.functions["test"]).to_i

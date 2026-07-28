@@ -5,6 +5,8 @@ require 'test_helper'
 
 class MCJITTestCase < Minitest::Test
   def setup
+    # MCJIT/RuntimeDyld is broken on riscv (upstream LLVM); ruby-llvm uses LLJIT there.
+    skip 'MCJIT is broken on riscv' if FFI::Platform::ARCH.to_s.start_with?('riscv')
     LLVM.init_jit(true)
   end
 
@@ -15,6 +17,8 @@ class MCJITTestCase < Minitest::Test
 
     result = engine.run_function(mod.functions['square'], 5)
     assert_equal 25, result.to_i
+  ensure
+    engine&.dispose
   end
 
   def test_functions_named
@@ -28,6 +32,8 @@ class MCJITTestCase < Minitest::Test
         assert_equal name.to_s, fun.name
       end
     end
+  ensure
+    engine&.dispose
   end
 
   def test_add_module
@@ -49,6 +55,8 @@ class MCJITTestCase < Minitest::Test
 
     result = engine.run_function(main_mod.functions['call_square'])
     assert_equal 25, result.to_i
+  ensure
+    engine&.dispose
   end
 
   def test_remove_module
@@ -67,6 +75,8 @@ class MCJITTestCase < Minitest::Test
       assert_equal mod2, ret
     end
     assert_nil engine.functions[:cube]
+  ensure
+    engine&.dispose
   end
 
   def test_accessors
@@ -86,5 +96,7 @@ class MCJITTestCase < Minitest::Test
       raise "New platform: #{FFI::Platform::OS}"
     end
     assert_match(matcher, engine.target_machine.triple)
+  ensure
+    engine&.dispose
   end
 end

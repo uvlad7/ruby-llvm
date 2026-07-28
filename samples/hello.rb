@@ -2,6 +2,7 @@
 # http://llvm.org/docs/LangRef.html#module-structure
 require 'llvm/core'
 require 'llvm/execution_engine'
+require 'llvm/lljit'
 
 HELLO_STRING = "Hello, World!"
 
@@ -52,6 +53,12 @@ if FFI::Platform::ADDRESS_SIZE == 32 && (FFI::Platform::IS_WINDOWS || FFI::Platf
   LLVM::C.add_symbol('_puts', puts_ptr) if puts_ptr
 end
 
-engine = LLVM::JITCompiler.new(mod)
+# MCJIT everywhere; LLJIT on riscv, where MCJIT/RuntimeDyld mis-relocates globals.
+if FFI::Platform::ARCH.to_s.start_with?('riscv')
+  engine = LLVM::LLJit.new
+  engine.add_module(mod)
+else
+  engine = LLVM::JITCompiler.new(mod)
+end
 engine.run_function(main)
 engine.dispose

@@ -216,4 +216,10 @@ class TargetTestCase < Minitest::Test
     assert_equal 0, layout.element_at_offset(struct, 3)
     assert_equal 1, layout.element_at_offset(struct, 4)
   end
+
+  def test_data_layout_dispose
+    layout = LLVM::TargetDataLayout.new("e-p:32:32:32")
+    layout.dispose
+    layout.dispose
+  end
 end
