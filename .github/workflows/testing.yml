@@ -8,10 +8,11 @@ on:
 
 jobs:
   test:
-    # TODO: temporary — add the rva23 label on riscv to target the spacemit board pool.
-    runs-on: ${{ contains(matrix.os, '-riscv') && fromJSON(format('["{0}", "rva23"]', matrix.os)) || matrix.os }}
+    runs-on: ${{ matrix.os }}
     # How to set up a riscv runner:
     # https://github.com/uvlad7/ffi-llvm-jit/blob/9b21d00d5f63afeae0e676477094e34f4d6ee88a/.github/workflows/main.yml#L142
+    # IBM s390x and ppc64le would be nice too
+    # https://github.com/IBM/actionspz
     strategy:
       fail-fast: false
       matrix:
@@ -25,10 +26,6 @@ jobs:
             ruby: '4.0'
           - os: windows-2025
             ruby: ruby-mswin
-          - os: windows-2025
-            ruby: ruby-mingw
-          - os: windows-2025
-            ruby: ruby-ucrt
         exclude:
           # Ruby 3.1's MSYS2 archive comes with gcc already installed, pinned to gcc-libs=14.2.0-3:
           #   error: failed to prepare transaction (could not satisfy dependencies)
@@ -38,7 +35,7 @@ jobs:
             ruby: '3.1'
           - os: windows-2025
             ruby: '3.1'
-    continue-on-error: ${{ endsWith(matrix.ruby, 'head') || matrix.ruby == 'debug' || startsWith(matrix.ruby, 'ruby-') }}
+    continue-on-error: ${{ endsWith(matrix.ruby, 'head') || matrix.ruby == 'debug' || matrix.ruby == 'ruby-mswin' }}
     steps:
       - uses: actions/checkout@v4
       # ruby/setup-ruby has no riscv64 prebuilts, so build Ruby with ruby-build and cache it in
@@ -163,10 +160,6 @@ jobs:
             if ($env:PROCESSOR_ARCHITECTURE -ne 'ARM64') {
               Add-Content -Path $env:GITHUB_ENV -Value "CXX=g++"
             }
-            # libLLVM-22.dll sits in llvm-config's bindir; put that dir on PATH so ffi_lib can load
-            # it at test time. Some MSYS2 trees (e.g. the ruby-mingw head build) don't have it there.
-            $llvmbin = ridk exec sh -c "cygpath -w `$(llvm-config --bindir)"
-            Add-Content -Path $env:GITHUB_PATH -Value $llvmbin
           }
           # MSYS2/llvm-project release both install the rolling 'opt.exe', not the versioned 'opt-22.exe'
           Add-Content -Path $env:GITHUB_ENV -Value "OPT=opt"
@@ -194,3 +187,53 @@ jobs:
         # sorbet-static has no Windows or riscv64 build (see Gemfile), so windows_setup is
         # deliberately omitted here and riscv is excluded, unlike the steps above
         if: (steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true') && !contains(matrix.os, '-riscv')
+
+  # Cygwin (POSIX layer on Windows). setup-ruby/ruby-build don't target Cygwin, so it uses Cygwin's
+  # package ruby + LLVM and runs the suite in a Cygwin bash shell — hence a separate job.
+  test-cygwin:
+    runs-on: windows-2025
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cygwin/cygwin-install-action@v5
+        with:
+          # llvm/clang 22.x are only in Cygwin's test channel (stable tops out at 20.x). Cygwin
+          # setup matches the exact version-release (no major.minor pinning), so pin each:
+          # LLVM 22.1.8 (clang's Cygwin revision is -2, the rest -1) and Ruby 4.0.6-1.
+          allow-test-packages: true
+          packages: >-
+            ruby=4.0.6-1, ruby-devel=4.0.6-1, rubygems, llvm=22.1.8-1, libllvm-devel=22.1.8-1,
+            clang=22.1.8-2, gcc-core, gcc-g++, make, libffi-devel, git
+      - name: "Build + test"
+        shell: C:\cygwin\bin\bash.exe --login -o igncr '{0}'
+        run: |
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          export OPT=opt
+          gem install bundler --no-document
+          bundle install
+          (cd ext/ruby-llvm-support && bundle exec rake)
+          bundle exec rake
+          bundle exec rake test:samples
+
+  # TODO: temporary — trying Option A for llvm-22 on riscv: Ubuntu 24.04 has no llvm-22, so run in
+  # an Ubuntu 26.04 (resolute) container on the 24.04 riscv runner (native riscv64; resolute has
+  # llvm-22-dev for riscv64). If this works, fold riscv back into `test:` on ubuntu-26.04-riscv once
+  # RISE provisions those boards, and drop the ruby-build/apt-riscv path there.
+  test-riscv:
+    runs-on: ubuntu-24.04-riscv
+    container: ubuntu:26.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ruby and LLVM 22
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ruby ruby-dev ruby-bundler build-essential llvm-22-dev clang-22 libffi-dev git ca-certificates
+      - run: bundle install
+      - run: cd ext/ruby-llvm-support && bundle exec rake
+        name: Build support library
+      - run: bundle exec rake
+        name: Run tests
+      - run: bundle exec rake test:samples
+        name: Run samples
