@@ -8,7 +8,8 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    # TODO: temporary — add the rva23 label on riscv to target the spacemit board pool.
+    runs-on: ${{ contains(matrix.os, '-riscv') && fromJSON(format('["{0}", "rva23"]', matrix.os)) || matrix.os }}
     # How to set up a riscv runner:
     # https://github.com/uvlad7/ffi-llvm-jit/blob/9b21d00d5f63afeae0e676477094e34f4d6ee88a/.github/workflows/main.yml#L142
     strategy:
