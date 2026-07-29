@@ -195,7 +195,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: cygwin/cygwin-install-action@v5
+      - uses: cygwin/cygwin-install-action@v6
         with:
           # llvm/clang 22.x are only in Cygwin's test channel (stable tops out at 20.x). Cygwin
           # setup matches the exact version-release (no major.minor pinning), so pin each:
@@ -215,25 +215,24 @@ jobs:
           bundle exec rake
           bundle exec rake test:samples
 
-  # TODO: temporary — trying Option A for llvm-22 on riscv: Ubuntu 24.04 has no llvm-22, so run in
-  # an Ubuntu 26.04 (resolute) container on the 24.04 riscv runner (native riscv64; resolute has
-  # llvm-22-dev for riscv64). If this works, fold riscv back into `test:` on ubuntu-26.04-riscv once
-  # RISE provisions those boards, and drop the ruby-build/apt-riscv path there.
+  # TODO: temporary — trying Option A for llvm-22 on riscv: Ubuntu 24.04 has no llvm-22, so build +
+  # test inside an Ubuntu 26.04 (resolute) container (resolute has llvm-22-dev for riscv64). Uses a
+  # manual `docker run --platform linux/riscv64` rather than a `container:` job — the latter's
+  # tail-keepalive died on this runner (and this forces the riscv64 image). Fold riscv back into
+  # `test:` on ubuntu-26.04-riscv once RISE provisions those boards.
   test-riscv:
     runs-on: ubuntu-24.04-riscv
-    container: ubuntu:26.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Install Ruby and LLVM 22
+      - name: Build + test in Ubuntu 26.04 (resolute) container
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ruby ruby-dev ruby-bundler build-essential llvm-22-dev clang-22 libffi-dev git ca-certificates
-      - run: bundle install
-      - run: cd ext/ruby-llvm-support && bundle exec rake
-        name: Build support library
-      - run: bundle exec rake
-        name: Run tests
-      - run: bundle exec rake test:samples
-        name: Run samples
+          docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w ubuntu:26.04 bash -euxc '
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ruby ruby-dev ruby-bundler build-essential llvm-22-dev clang-22 libffi-dev git ca-certificates
+            bundle install
+            (cd ext/ruby-llvm-support && bundle exec rake)
+            bundle exec rake
+            bundle exec rake test:samples
+          '
