@@ -16,8 +16,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TODO: temporary — ubuntu-24.04-riscv to check runner pickup; restore ubuntu-26.04-riscv (needs llvm-22).
-        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, ubuntu-24.04-riscv, macos-14, macos-15, macos-15-intel, windows-2022, windows-2025]
+        # riscv omitted until RVA23 runners land: ubuntu-26.04-riscv (RVA23/spacemit) isn't
+        # provisioned yet, and the available RVA20 ubuntu-24.04-riscv board SIGILLs on RVA23-only
+        # llvm-22 (Ubuntu 26.04) — no prebuilt rv64gc llvm-22 exists. Re-add ubuntu-26.04-riscv here
+        # once those boards are online; the riscv steps below already handle it.
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15, macos-15-intel, windows-2022, windows-2025]
         ruby: ['3.1', '3.2', '3.3', '3.4', '4.0']
         include:
           - os: windows-11-arm
@@ -193,6 +196,8 @@ jobs:
   test-cygwin:
     runs-on: windows-2025
     continue-on-error: true
+    # Cygwin's slow fork/exec makes gem installs crawl; cap it so a stall can't run for hours.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: cygwin/cygwin-install-action@v6
@@ -200,39 +205,22 @@ jobs:
           # llvm/clang 22.x are only in Cygwin's test channel (stable tops out at 20.x). Cygwin
           # setup matches the exact version-release (no major.minor pinning), so pin each:
           # LLVM 22.1.8 (clang's Cygwin revision is -2, the rest -1) and Ruby 4.0.6-1.
+          # pkg-config lets ffi find the system libffi instead of doing a slow bundled build.
           allow-test-packages: true
           packages: >-
             ruby=4.0.6-1, ruby-devel=4.0.6-1, rubygems, llvm=22.1.8-1, libllvm-devel=22.1.8-1,
-            clang=22.1.8-2, gcc-core, gcc-g++, make, libffi-devel, git
+            clang=22.1.8-2, gcc-core, gcc-g++, make, libffi-devel, pkg-config, git
       - name: "Build + test"
         shell: C:\cygwin\bin\bash.exe --login -o igncr '{0}'
         run: |
+          # The runner's preinstalled Windows Ruby (hostedtoolcache) leaks into the Cygwin shell and
+          # shadows Cygwin's ruby/bundle (bundle exec then re-execs the wrong ruby → LoadError).
+          # Strip any ruby-named PATH entry, the same way ruby/setup-ruby does.
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -viE '\bruby\b' | paste -sd:)"
           cd "$(cygpath -u "$GITHUB_WORKSPACE")"
           export OPT=opt
-          gem install bundler --no-document
-          bundle install
+          bundle config set --local build.ffi --enable-system-libffi
+          bundle install --jobs 4
           (cd ext/ruby-llvm-support && bundle exec rake)
           bundle exec rake
           bundle exec rake test:samples
-
-  # TODO: temporary — trying Option A for llvm-22 on riscv: Ubuntu 24.04 has no llvm-22, so build +
-  # test inside an Ubuntu 26.04 (resolute) container (resolute has llvm-22-dev for riscv64). Uses a
-  # manual `docker run --platform linux/riscv64` rather than a `container:` job — the latter's
-  # tail-keepalive died on this runner (and this forces the riscv64 image). Fold riscv back into
-  # `test:` on ubuntu-26.04-riscv once RISE provisions those boards.
-  test-riscv:
-    runs-on: ubuntu-24.04-riscv
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build + test in Ubuntu 26.04 (resolute) container
-        run: |
-          docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w ubuntu:26.04 bash -euxc '
-            apt-get update
-            apt-get install -y --no-install-recommends \
-              ruby ruby-dev ruby-bundler build-essential llvm-22-dev clang-22 libffi-dev git ca-certificates
-            bundle install
-            (cd ext/ruby-llvm-support && bundle exec rake)
-            bundle exec rake
-            bundle exec rake test:samples
-          '
