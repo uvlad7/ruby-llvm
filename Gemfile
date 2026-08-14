@@ -11,3 +11,7 @@ gem "sorbet-static" unless Gem.win_platform?
 
 # tapioca depends on sorbet-static-and-runtime -> sorbet-static, same problem.
 gem "tapioca", "~> 0.16.11" unless Gem.win_platform?
+
+group :devtools, optional: true do
+  gem "ffi_gen", source: "https://gem.coop/@uvlad7"
+end
