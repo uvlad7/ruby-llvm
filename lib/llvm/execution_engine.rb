@@ -27,7 +27,7 @@ module LLVM
         if status.zero?
           @ptr = ptr.read_pointer
         else
-          C.dispose_message(error)
+          C.dispose_message(errorp)
           error.autorelease = false
           raise "Error creating JIT compiler: #{message}"
         end
@@ -65,6 +65,10 @@ module LLVM
     # free backend memory after use.
     #: (LLVM::Function, *untyped) -> GenericValue?
     def run_function(fun, *args)
+      # TODO: remove?
+      # On LLVM-20 and 22 it fails:
+      #   LLVM ERROR: MCJIT::runFunction does not support full-featured argument passing.
+      #   Please use ExecutionEngine::getFunctionAddress and cast the result to the desired function pointer type.
       result = nil #: GenericValue?
       FFI::MemoryPointer.new(FFI.type_size(:pointer) * args.size) do |args_ptr|
         new_values = []
