@@ -89,9 +89,9 @@ module LLVM
     # Print the type's representation to stdout.
     #: -> void
     def dump
-      # :nocov:
+      # simplecov:disable
       C.dump_type(self)
-      # :nocov:
+      # simplecov:enable
     end
 
     # Build string of LLVM type representation.
@@ -484,7 +484,7 @@ module LLVM
   end
 
   # for compatibility
-  # Create a float LLVM::ContantReal from a Ruby Float (value).
+  # Create a float LLVM::ConstantReal from a Ruby Float (value).
   # This will always return ConstantReal because value will always be Numeric
   #: (Numeric) -> ConstantReal
   def Float(value)
@@ -492,7 +492,7 @@ module LLVM
   end
 
   # for compatibility
-  # Create a double LLVM::ContantReal from a Ruby Float (value).
+  # Create a double LLVM::ConstantReal from a Ruby Float (value).
   # This will always return ConstantReal because value will always be Numeric
   #: (Numeric) -> ConstantReal
   def Double(value)
