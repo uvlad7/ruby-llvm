@@ -5,34 +5,40 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/IR/Attributes.h>
 
+#ifdef _WIN32
+#define LLVM_SUPPORT_API __declspec(dllexport)
+#else
+#define LLVM_SUPPORT_API
+#endif
+
 extern "C" {
-  void LLVMInitializeAllTargetInfos() {
+  LLVM_SUPPORT_API void LLVMInitializeAllTargetInfos() {
     llvm::InitializeAllTargetInfos();
   }
 
-  void LLVMInitializeAllTargets() {
+  LLVM_SUPPORT_API void LLVMInitializeAllTargets() {
     llvm::InitializeAllTargets();
   }
 
-  void LLVMInitializeAllTargetMCs() {
+  LLVM_SUPPORT_API void LLVMInitializeAllTargetMCs() {
     llvm::InitializeAllTargetMCs();
   }
 
-  void LLVMInitializeAllAsmPrinters() {
+  LLVM_SUPPORT_API void LLVMInitializeAllAsmPrinters() {
     llvm::InitializeAllAsmPrinters();
   }
 
-  void LLVMInitializeNativeTarget() {
+  LLVM_SUPPORT_API void LLVMInitializeNativeTarget() {
     llvm::InitializeNativeTarget();
   }
 
-  void LLVMInitializeNativeAsmPrinter() {
+  LLVM_SUPPORT_API void LLVMInitializeNativeAsmPrinter() {
     llvm::InitializeNativeTargetAsmPrinter();
   }
 
   // static StringRef getNameFromAttrKind(Attribute::AttrKind AttrKind)
   // https://llvm.org/doxygen/classllvm_1_1Attribute.html
-  const char* LLVMGetEnumAttributeNameForKind(const unsigned KindID) {
+  LLVM_SUPPORT_API const char* LLVMGetEnumAttributeNameForKind(const unsigned KindID) {
     const auto AttrKind = (llvm::Attribute::AttrKind) KindID;
     const auto S = llvm::Attribute::getNameFromAttrKind(AttrKind);
     return S.data();
@@ -41,7 +47,7 @@ extern "C" {
   // std::string Attribute::getAsString(bool InAttrGrp = false) const
   // https://llvm.org/doxygen/classllvm_1_1Attribute.html
   // string must be disposed with LLVMDisposeMessage
-  const char* LLVMGetAttributeAsString(LLVMAttributeRef A) {
+  LLVM_SUPPORT_API const char* LLVMGetAttributeAsString(LLVMAttributeRef A) {
     auto S = llvm::unwrap(A).getAsString();
     return strdup(S.c_str());
   }
