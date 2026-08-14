@@ -62,19 +62,29 @@ class ModuleTestCase < Minitest::Test
 
   def test_dump
     mod = LLVM::Module.new('test_print')
-    expected_pattern = /^; ModuleID = 'test_print'$/
 
-    Tempfile.create('test_dump.1') do |tmpfile|
-      # debug stream (stderr)
+    if RUBY_PLATFORM.include?('mswin')
+      # Output goes to the extension DLL's CRT fd table, not Ruby's, so pipe
+      # redirection cannot capture it. Just verify the call doesn't crash.
+      mod.dump
+      skip 'Cannot capture dump output on mswin: CRT fd table isolation'
+    end
+
+    rd, wr = IO.pipe
+    begin
       stderr_old = $stderr.dup
-      $stderr.reopen(tmpfile.path, 'a')
+      $stderr.reopen(wr)
+      wr.close
       begin
         mod.dump
         $stderr.flush
-        assert_match expected_pattern, File.read(tmpfile.path)
       ensure
         $stderr.reopen(stderr_old)
+        stderr_old.close
       end
+      assert_match(/^; ModuleID = 'test_print'$/, rd.read)
+    ensure
+      rd.close
     end
   end
 
