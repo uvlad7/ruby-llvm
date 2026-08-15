@@ -5,9 +5,7 @@ require 'ffi'
 module LLVM::C
   extend FFI::Library
 
-  ffi_lib ["LLVM-#{LLVM::LLVM_VERSION}", "libLLVM-#{LLVM::LLVM_VERSION}",
-           "libLLVM-#{LLVM::LLVM_VERSION}.so.1",
-           "libLLVM.so.#{LLVM::LLVM_VERSION}", "libLLVM.so.#{LLVM::LLVM_VERSION}.1", "LLVM-C"]
+  LLVM.inject_llvm_libs(self)
   # (Not documented)
   #
   # @method parse_bitcode(mem_buf, out_module, out_message)

@@ -116,10 +116,7 @@ module LLVM
     module C
       extend FFI::Library
 
-      ffi_lib_flags(:lazy, :global)
-      ffi_lib ["LLVM-#{LLVM_VERSION}", "libLLVM-#{LLVM_VERSION}",
-               "libLLVM-#{LLVM_VERSION}.so.1",
-               "libLLVM.so.#{LLVM_VERSION}", "libLLVM.so.#{LLVM_VERSION}.1", "LLVM-C",]
+      LLVM.inject_llvm_libs(self)
 
       attach_function :create_lljit_builder, :LLVMOrcCreateLLJITBuilder, [], :pointer
       attach_function :create_lljit, :LLVMOrcCreateLLJIT, [:pointer, :pointer], :pointer

@@ -7,6 +7,27 @@ require 'llvm/core_ffi_v2'
 require 'llvm/support'
 
 module LLVM
+  module C
+    attach_function :get_version, :LLVMGetVersion, [:pointer, :pointer, :pointer], :void
+  end
+
+  # Verify the loaded LLVM matches the major.minor ruby-llvm targets (patch is ignored). ELF and
+  # MinGW pin the version through the versioned library name, but on MSVC (mswin) ffi_lib loads
+  # the unversioned LLVM-C.dll, which could be any version — so fail fast on a mismatch.
+  #: -> void
+  def self.assert_llvm_version!
+    maj = FFI::MemoryPointer.new(:uint)
+    min = FFI::MemoryPointer.new(:uint)
+    pat = FFI::MemoryPointer.new(:uint)
+    C.get_version(maj, min, pat)
+    required = LLVM_REQUIRED_VERSION.split('.').first(2).join('.')
+    return if "#{maj.read_uint}.#{min.read_uint}" == required
+
+    raise "ruby-llvm #{RUBY_LLVM_VERSION} requires LLVM #{required}.x, " \
+          "but loaded LLVM #{maj.read_uint}.#{min.read_uint}.#{pat.read_uint}"
+  end
+  assert_llvm_version!
+
   # Yields a pointer suitable for storing an LLVM output message.
   # If the message pointer is non-NULL (an error has happened), converts
   # the result to a string and returns it. Otherwise, returns +nil+.

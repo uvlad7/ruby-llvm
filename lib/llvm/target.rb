@@ -29,9 +29,7 @@ module LLVM
     module TargetModule
       extend FFI::Library
 
-      ffi_lib ["LLVM-#{LLVM_VERSION}", "libLLVM-#{LLVM_VERSION}",
-               "libLLVM-#{LLVM_VERSION}.so.1",
-               "libLLVM.so.#{LLVM_VERSION}", "libLLVM.so.#{LLVM_VERSION}.1", "LLVM-C",]
+      LLVM.inject_llvm_libs(self)
       #: (*untyped) -> void
       def self.safe_attach_function(*args)
         attach_function(

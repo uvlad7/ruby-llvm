@@ -6,6 +6,12 @@ require 'tempfile'
 require 'llvm/version'
 require 'llvm/config'
 
+unless LLVM::C.respond_to?(:get_inline_asm)
+  LLVM::C.attach_function :get_inline_asm, :LLVMGetInlineAsm,
+                          [:pointer, :string, :size_t, :string, :size_t, :int, :int, :int, :int],
+                          :pointer
+end
+
 class TargetTestCase < Minitest::Test
   def setup
     LLVM::Target.init('X86', true)
@@ -41,6 +47,30 @@ class TargetTestCase < Minitest::Test
   def test_init_native_disassembler
     LLVM::Target.init_native
     LLVM::Target.init_native_disassembler
+  end
+
+  # The existing init tests above only check the init calls don't raise — not that the capability
+  # is actually registered in the registry the bindings use. A JIT'd function containing inline asm
+  # forces the JIT to run the native asm parser, so it only succeeds if init_native_asm_parser
+  # (support's LLVMInitializeNativeAsmParser) landed in the bindings' registry. On mswin that C-API
+  # init must resolve to LLVM-C.dll, not support's statically-linked copy — this exercises it fully.
+  def test_native_asm_parser_usable_through_jit
+    LLVM.init_jit
+    LLVM::Target.init_native_asm_parser
+
+    mod = LLVM::Module.new("asm_test")
+    fn = mod.functions.add("with_asm", LLVM.Function([], LLVM.Void))
+    fn.basic_blocks.append("entry").build do |builder|
+      asm_ty = LLVM.Function([], LLVM.Void)
+      # "nop", has_side_effects=1 so it isn't optimized away; ATT dialect; can_throw=0.
+      asm = LLVM::C.get_inline_asm(asm_ty, "nop", 3, "", 0, 1, 0, 0, 0)
+      LLVM::C.build_call2(builder, asm_ty, asm, nil, 0, "")
+      builder.ret_void
+    end
+    assert_predicate mod, :valid?
+
+    # Compiling this assembles the inline asm; a wrong-registry split fails to parse it.
+    assert_nil run_function_on_module(mod, "with_asm")
   end
 
   def test_native_arch

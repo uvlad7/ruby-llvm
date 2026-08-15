@@ -5,6 +5,7 @@ require 'ffi'
 
 module LLVM
   require 'llvm/version'
+  require 'llvm/library'
   require 'llvm/support'
 
   class DeprecationError < StandardError; end

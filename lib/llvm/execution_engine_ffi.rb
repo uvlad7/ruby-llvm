@@ -5,9 +5,7 @@ require 'ffi'
 module LLVM::C
   extend FFI::Library
 
-  ffi_lib ["LLVM-#{LLVM::LLVM_VERSION}", "libLLVM-#{LLVM::LLVM_VERSION}",
-           "libLLVM-#{LLVM::LLVM_VERSION}.so.1",
-           "libLLVM.so.#{LLVM::LLVM_VERSION}", "libLLVM.so.#{LLVM::LLVM_VERSION}.1", "LLVM-C"] # TODO: LLVM-C version
+  LLVM.inject_llvm_libs(self) # TODO: LLVM-C version
   # @defgroup LLVMCExecutionEngine Execution Engine
   # @ingroup LLVMC
   #

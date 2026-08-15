@@ -48,7 +48,7 @@ jobs:
             ruby: truffleruby
           - os: windows-2025
             ruby: truffleruby
-    continue-on-error: ${{ endsWith(matrix.ruby, 'head') || matrix.ruby == 'debug' || matrix.ruby == 'ruby-mswin' }}
+    continue-on-error: ${{ endsWith(matrix.ruby, 'head') || matrix.ruby == 'debug' }}
     steps:
       - uses: actions/checkout@v4
       # ruby/setup-ruby has no riscv64 prebuilts, so build Ruby with ruby-build and cache it in
@@ -205,7 +205,6 @@ jobs:
   # package ruby + LLVM and runs the suite in a Cygwin bash shell — hence a separate job.
   test-cygwin:
     runs-on: windows-2025
-    continue-on-error: true
     # Cygwin's slow fork/exec makes gem installs crawl; cap it so a stall can't run for hours.
     timeout-minutes: 45
     steps:
@@ -240,7 +239,6 @@ jobs:
   # `docker run --platform linux/riscv64` (forces the riscv64 image; checkout stays on the host).
   test-riscv-opensuse:
     runs-on: ubuntu-24.04-riscv
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Build + test in openSUSE Tumbleweed (glibc, llvm 22)
@@ -260,10 +258,10 @@ jobs:
           '
   test-riscv-alpine:
     runs-on: ubuntu-24.04-riscv
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Build + test in Alpine edge (musl, llvm 22)
+      # TODO: ensure all runs fail if one of the commands fails
         run: |
           docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w alpine:edge sh -euxc '
             apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
