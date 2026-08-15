@@ -26,7 +26,7 @@ Gem::Specification.new do |s|
   s.add_dependency             'rake',     '>= 12', '< 14'
 
   s.add_development_dependency 'benchmark'
-  s.add_development_dependency 'debug'
+  s.add_development_dependency 'debug' if RUBY_ENGINE == 'ruby' # native ext; not on jruby/truffleruby
   s.add_development_dependency 'fiddle'
   s.add_development_dependency 'minitest', '~> 5.16'
   s.add_development_dependency 'minitest-fail-fast'

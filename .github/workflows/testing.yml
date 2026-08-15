@@ -9,6 +9,8 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      JRUBY_OPTS: "-J-Xss4096k" # raise JVM stack so the recursive factorial sample doesn't overflow
     # How to set up a riscv runner:
     # https://github.com/uvlad7/ffi-llvm-jit/blob/9b21d00d5f63afeae0e676477094e34f4d6ee88a/.github/workflows/main.yml#L142
     # IBM s390x and ppc64le would be nice too
@@ -21,7 +23,7 @@ jobs:
         # llvm-22 (Ubuntu 26.04) — no prebuilt rv64gc llvm-22 exists. Re-add ubuntu-26.04-riscv here
         # once those boards are online; the riscv steps below already handle it.
         os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15, macos-15-intel, windows-2022, windows-2025]
-        ruby: ['3.1', '3.2', '3.3', '3.4', '4.0']
+        ruby: ['3.1', '3.2', '3.3', '3.4', '4.0', 'jruby', 'truffleruby']
         include:
           - os: windows-11-arm
             ruby: '3.4'
@@ -38,6 +40,14 @@ jobs:
             ruby: '3.1'
           - os: windows-2025
             ruby: '3.1'
+          - os: windows-2022
+            ruby: jruby
+          - os: windows-2025
+            ruby: jruby
+          - os: windows-2022
+            ruby: truffleruby
+          - os: windows-2025
+            ruby: truffleruby
     continue-on-error: ${{ endsWith(matrix.ruby, 'head') || matrix.ruby == 'debug' || matrix.ruby == 'ruby-mswin' }}
     steps:
       - uses: actions/checkout@v4
@@ -224,3 +234,47 @@ jobs:
           (cd ext/ruby-llvm-support && bundle exec rake)
           bundle exec rake
           bundle exec rake test:samples
+
+  # llvm-22 on the RVA20 riscv runner via rv64gc distro containers (Ubuntu 26.04 is RVA23 → SIGILL).
+  # Both openSUSE (glibc) and Alpine (musl) ship llvm-22 for riscv64 built rv64gc. Run via
+  # `docker run --platform linux/riscv64` (forces the riscv64 image; checkout stays on the host).
+  test-riscv-opensuse:
+    runs-on: ubuntu-24.04-riscv
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + test in openSUSE Tumbleweed (glibc, llvm 22)
+        run: |
+          docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w opensuse/tumbleweed bash -euxc '
+            # the tumbleweed image snapshot lags the rolling repo, so refresh metadata first or the
+            # freshly-added llvm22 packages are "not found".
+            zypper -n --gpg-auto-import-keys ref
+            zypper -n install ruby ruby-devel gcc-c++ make libffi-devel llvm22 llvm22-devel
+            # openSUSE installs versioned binaries on PATH (/usr/bin/llvm-config-22, opt-22), which
+            # find_llvm_config and the default OPT (opt-22) already pick up — no PATH/OPT tweak needed.
+            gem install bundler --no-document
+            bundle install
+            (cd ext/ruby-llvm-support && bundle exec rake)
+            bundle exec rake
+            bundle exec rake test:samples
+          '
+  test-riscv-alpine:
+    runs-on: ubuntu-24.04-riscv
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + test in Alpine edge (musl, llvm 22)
+        run: |
+          docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w alpine:edge sh -euxc '
+            apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
+            # Alpine puts versioned tools on PATH (/usr/bin/llvm-config-22 → found by find_llvm_config),
+            # but names opt "opt22" (no dash), so the default OPT (opt-22) misses — set it explicitly.
+            export OPT=opt22
+            gem install bundler --no-document
+            bundle install
+            (cd ext/ruby-llvm-support && bundle exec rake)
+            bundle exec rake
+            bundle exec rake test:samples
+          '
+
+# TODO: armv7, win32 (mswin, mingw), musl, freebsd, ppc64le, sparc64, linux x86
