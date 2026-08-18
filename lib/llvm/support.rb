@@ -43,6 +43,11 @@ module LLVM
       attach_function :get_attribute_as_string, :LLVMGetAttributeAsString, [:pointer], :string
 
       attach_function :dump_module_to_stderr, :LLVMDumpModuleToStderr, [:pointer], :int
+
+      # Real address of LLVMGetVersion as this support lib links it (dllimport on MSVC, so the IAT
+      # target rather than a local thunk). Compared against the ffi-loaded libLLVM's own resolution
+      # in LLVM.assert_support_shares_llvm! to detect a split libLLVM instance.
+      attach_function :get_version_addr, :LLVMSupportGetVersionAddr, [], :pointer
     end
   end
 

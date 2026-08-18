@@ -27,6 +27,7 @@ module LLVM
           "but loaded LLVM #{maj.read_uint}.#{min.read_uint}.#{pat.read_uint}"
   end
   assert_llvm_version!
+  assert_support_shares_llvm!
 
   # Yields a pointer suitable for storing an LLVM output message.
   # If the message pointer is non-NULL (an error has happened), converts
