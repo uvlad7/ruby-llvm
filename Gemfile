@@ -17,6 +17,8 @@ if RUBY_PLATFORM.match?(/darwin|(?:x86_64|aarch64)-linux/)
   end
 end
 
-group :devtools, optional: true do
-  gem "ffi_gen", source: "https://gem.coop/@uvlad7"
+unless RUBY_PLATFORM.match?(/mswin|mingw|cygwin/)
+  group :devtools, optional: true do
+    gem "ffi_gen", source: "https://gem.coop/@uvlad7"
+  end
 end
