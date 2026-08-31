@@ -88,6 +88,13 @@ jobs:
         with:
           path: ${{ runner.tool_cache }}/Ruby
           key: ruby-${{ matrix.os }}-${{ matrix.ruby }}
+      # JRuby 10 is compiled for Java 21 (class file 65); the runners default to 17, which
+      # fails with UnsupportedClassVersionError before setup-ruby can even start it.
+      - if: startsWith(matrix.ruby, 'jruby')
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: ${{ matrix.ruby }}
