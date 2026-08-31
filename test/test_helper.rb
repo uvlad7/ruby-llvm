@@ -37,6 +37,7 @@ if !ENV['RM_INFO']
 end
 
 require "llvm/core"
+require "llvm/lljit"
 require "llvm/execution_engine"
 
 class Minitest::Test
