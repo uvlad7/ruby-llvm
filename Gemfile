@@ -12,7 +12,9 @@ gemspec
 # + BUNDLE_WITHOUT cannot avoid that either; guard by platform so it is absent from the
 # graph. Kept in a group so it can still be skipped explicitly (e.g. for a faster
 # install) where it does build.
-if RUBY_PLATFORM.match?(/darwin|(?:x86_64|aarch64)-linux/)
+# anchored: x86_64-linux-musl would otherwise substring-match x86_64-linux, and sorbet-static
+# publishes no musl build -- bundler then fails to resolve on Alpine before anything runs
+if RUBY_PLATFORM.match?(/darwin|(?:x86_64|aarch64)-linux\z/)
   group :typecheck do
     gem "sorbet-static"
     gem "tapioca", "~> 0.16.11"
