@@ -7,33 +7,32 @@ begin
   require "debug"
 rescue LoadError
   # Ignore ruby-debug is case it's not installed
+rescue ArgumentError => e
+  # debug installs a method-added tracker built on TracePoint's :call event, which TruffleRuby
+  # does not implement. It raises ArgumentError rather than LoadError, so the rescue above does
+  # not catch it and the whole suite dies on require. It is only a convenience for interactive
+  # debugging, so carrying on without it is fine.
+  warn "Proceeding without the debug gem: #{e.message}"
 end
 
-# SimpleCov drives coverage through TracePoint's :call event, which TruffleRuby does not
-# implement -- requiring it there aborts the whole suite before a single test runs. Coverage
-# from one runtime is enough, so skip it rather than lose the run.
-if RUBY_ENGINE == 'truffleruby'
-  warn 'Proceeding without SimpleCov: TruffleRuby has no TracePoint :call event.'
-else
-  begin
-    require 'simplecov'
+begin
+  require 'simplecov'
 
-    unless SimpleCov::Configuration.method_defined?(:skip)
-      mod = SimpleCov::Configuration #: as untyped
-      mod.send(:alias_method, :skip, :add_filter)
-    end
-    SimpleCov.start do
-      skip "/test/"
-      skip "/lib/llvm/transforms/scalar.rb"
-      skip "/lib/llvm/transforms/ipo.rb"
-      skip "/lib/llvm/transforms/vectorize.rb"
-      skip "/lib/llvm/transforms/utils.rb"
-      skip "/lib/llvm/transforms/builder.rb"
-      skip "/lib/llvm/core/pass_manager.rb"
-    end
-  rescue LoadError
-    warn "Proceeding without SimpleCov. gem install simplecov on supported platforms."
+  unless SimpleCov::Configuration.method_defined?(:skip)
+    mod = SimpleCov::Configuration #: as untyped
+    mod.send(:alias_method, :skip, :add_filter)
   end
+  SimpleCov.start do
+    skip "/test/"
+    skip "/lib/llvm/transforms/scalar.rb"
+    skip "/lib/llvm/transforms/ipo.rb"
+    skip "/lib/llvm/transforms/vectorize.rb"
+    skip "/lib/llvm/transforms/utils.rb"
+    skip "/lib/llvm/transforms/builder.rb"
+    skip "/lib/llvm/core/pass_manager.rb"
+  end
+rescue LoadError
+  warn "Proceeding without SimpleCov. gem install simplecov on supported platforms."
 end
 
 require "minitest/autorun"
