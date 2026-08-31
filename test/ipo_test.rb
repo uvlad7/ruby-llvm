@@ -8,6 +8,8 @@ require 'llvm/core/pass_manager'
 
 class IPOTestCase < Minitest::Test
   def setup
+    # builds an MCJIT engine directly rather than going through JIT_ENGINES
+    skip "MCJIT is unusable on #{FFI::Platform::ARCH}" unless mcjit_supported?
     LLVM.init_jit
   end
 

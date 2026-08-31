@@ -177,14 +177,33 @@ def register_jit_symbol(name)
   LLVM::C.add_symbol(underscore_mangled_symbols? ? "_#{name}" : name, ptr)
 end
 
-# JIT engines the suite exercises.
+# Targets where MCJIT's RuntimeDyld is unusable:
 #
-# LLJIT (ORC) runs everywhere: it is where upstream LLVM is heading, it is the only engine that
-# works on some targets, and testing it only as a fallback left it barely covered. MCJIT runs
-# wherever it is not known-broken -- on riscv64 its RuntimeDyld mis-relocates globals.
+#   riscv64  mis-relocates globals, so JIT'd code reads the wrong memory.
+#   arm      JIT'd calls out of the module can spin forever. Observed on Alpine musl with
+#            LLVM 21, where both a libruby call (CallTestCase#test_calls_into_libruby) and a
+#            plain libc one (#test_external) hung. It is not universal on armv7 -- the same
+#            suite passes on Debian glibc with LLVM 22 -- but which toolchains are affected is
+#            not established, so the engine is skipped on 32-bit arm outright.
+#
+# It has to be avoided rather than contained: the spinning frame is JIT'd code holding the GIL,
+# so Timeout's thread never runs and the process has to be killed from outside. A hang costs a
+# whole CI job, which is why this errs toward skipping.
+#: -> bool
+def mcjit_supported?
+  return false if FFI::Platform::ARCH.to_s.start_with?('riscv')
+
+  # 32-bit arm only: aarch64 is fine, and it also reports an 'arm'-prefixed arch on some
+  # platforms, so the pointer size is what separates them -- as for Windows above.
+  !(FFI::Platform::ARCH.to_s.start_with?('arm') && FFI::Platform::ADDRESS_SIZE == 32)
+end
+
+# JIT engines the suite exercises. LLJIT (ORC) runs everywhere: it is where upstream LLVM is
+# heading, it is the only engine that works on some targets, and testing it only as a fallback
+# left it barely covered.
 JIT_ENGINES = [
   :lljit,
-  *(FFI::Platform::ARCH.to_s.start_with?('riscv') ? [] : [:mcjit]),
+  *(mcjit_supported? ? [:mcjit] : []),
 ].freeze #: Array[Symbol]
 
 # Engine a test runs under. Parametrized classes override this. Everything else keeps MCJIT,
