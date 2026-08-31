@@ -433,7 +433,21 @@ jobs:
             bundle exec rake test:samples
           '
 
-# Still uncovered: mingw32 and cygwin-32 (no 32-bit ruby in setup-ruby / cygwin-install-action;
-# both also top out at LLVM 21, so they belong on the llvm-21 branch), msys proper (as opposed to
-# the mingw64 toolchain the matrix already uses), and sparc64 - see the s390x note above for why
-# big-endian coverage goes through s390x instead.
+# Still uncovered here, and why:
+#
+# - sparc64: qemu binfmt (tonistiigi/binfmt) has no sparc64 emulator, and the NetBSD/OpenBSD VMs
+#   that do offer it carry pkgsrc LLVM 19. s390x provides the big-endian coverage instead.
+# - msys proper, as opposed to the mingw64 toolchain the matrix already uses.
+#
+# TODO: the following are blocked on THIS branch by its LLVM 22 requirement, not by the platform,
+# so they belong on the older version branches where the toolchain exists:
+#
+# - riscv64 as a direct matrix job (ubuntu-26.04-riscv). The RVA23 boards are not provisioned and
+#   the available RVA20 ubuntu-24.04-riscv board SIGILLs on RVA23-only llvm-22, so riscv64 runs
+#   here only through the rv64gc distro containers below. On llvm-21 and earlier there is a
+#   prebuilt rv64gc toolchain, so the direct job works there.
+# - mingw32 and cygwin-32: no 32-bit ruby in setup-ruby or cygwin-install-action, and both cap at
+#   LLVM 21 regardless -- llvm-21 branch.
+#
+# Alpine (musl) is covered on x86_64, i386, armv7 and riscv64; see test-container,
+# test-container-emulated and test-riscv-alpine.
