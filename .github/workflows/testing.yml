@@ -12,6 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # riscv omitted until RVA23 runners land: ubuntu-26.04-riscv (RVA23/spacemit) isn't
+        # provisioned yet, and the available RVA20 ubuntu-24.04-riscv board SIGILLs on RVA23-only
+        # llvm-22 (Ubuntu 26.04) - no prebuilt rv64gc llvm-22 exists. Re-add ubuntu-26.04-riscv here
+        # once those boards are online; the riscv steps below already handle it.
         os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, ubuntu-26.04, macos-14, macos-15, macos-15-intel, macos-26, macos-26-intel, windows-2022, windows-2025]
         ruby: ['3.1', '3.2', '3.3', '3.4', '4.0']
         include:
@@ -48,6 +52,33 @@ jobs:
       # the windows path calls `ridk exec` to install LLVM into the MSYS2 tree of
       # whichever Ruby setup-ruby just installed, so Ruby has to exist first.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # ruby/setup-ruby has no riscv64 prebuilts, so build Ruby with ruby-build and cache it in
+      # the tool cache where setup-ruby then finds it (same approach as ffi-llvm-jit).
+      - if: contains(matrix.os, '-riscv')
+        name: Restore Ruby cache (riscv64)
+        id: ruby-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.tool_cache }}/Ruby
+          key: ruby-${{ matrix.os }}-${{ matrix.ruby }}
+      - if: contains(matrix.os, '-riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: rbenv/ruby-build
+          ref: v20260520
+          path: tmp/ruby-build
+      - if: contains(matrix.os, '-riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Build Ruby (riscv64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf bison patch build-essential libssl-dev libyaml-dev \
+            libreadline-dev zlib1g-dev libgmp-dev libffi-dev
+          sudo ./tmp/ruby-build/install.sh
+          RUBY_EXACT=$(ruby-build --definitions | grep -E "^${{ matrix.ruby }}\." | sort -V | tail -1)
+          [ -n "${RUBY_EXACT}" ] || { echo "No ruby-build definition for Ruby ${{ matrix.ruby }}"; exit 1; }
+          ruby-build "${RUBY_EXACT}" "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64"
+          touch "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64.complete"
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: ${{ matrix.ruby }}
@@ -212,6 +243,14 @@ jobs:
           - {label: 'Debian glibc i386', image: 'i386/debian:testing', platform: 'linux/386'}
           # 32-bit arm, via qemu; slowest of the three, so it runs last.
           - {label: 'Debian glibc armv7', image: 'arm32v7/debian:testing', platform: 'linux/arm/v7'}
+          # musl on 32-bit, so the two axes meet rather than only being covered separately.
+          - {label: 'Alpine musl i386', image: 'i386/alpine:edge', platform: 'linux/386'}
+          - {label: 'Debian glibc ppc64le', image: 'ppc64le/debian:testing', platform: 'linux/ppc64le'}
+          # The only big-endian target here: byte order shows up in FFI struct packing and in
+          # how IR constants are laid out, and nothing else in this matrix would catch it.
+          # sparc64 would do as well but cannot run: qemu binfmt (tonistiigi/binfmt) has no
+          # sparc64, and the NetBSD/OpenBSD VMs that do offer it carry pkgsrc LLVM 19, not 22.
+          - {label: 'Debian glibc s390x (big-endian)', image: 's390x/debian:testing', platform: 'linux/s390x'}
     name: ${{ matrix.label }}
     timeout-minutes: 60
     steps:
@@ -264,7 +303,49 @@ jobs:
             bundle exec rake
             bundle exec rake test:samples
 
+  # llvm-22 on the RVA20 riscv runner via rv64gc distro containers (Ubuntu 26.04 is RVA23 -> SIGILL).
+  # Both openSUSE (glibc) and Alpine (musl) ship llvm-22 for riscv64 built rv64gc. Run via
+  # `docker run --platform linux/riscv64` (forces the riscv64 image; checkout stays on the host).
+  test-riscv-opensuse:
+    runs-on: ubuntu-24.04-riscv
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build + test in openSUSE Tumbleweed (glibc, llvm 22)
+        run: |
+          docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w opensuse/tumbleweed bash -euxc '
+            # the tumbleweed image snapshot lags the rolling repo, so refresh metadata first or the
+            # freshly-added llvm22 packages are "not found".
+            zypper -n --gpg-auto-import-keys ref
+            zypper -n install ruby ruby-devel gcc-c++ make libffi-devel llvm22 llvm22-devel
+            # openSUSE installs versioned binaries on PATH (/usr/bin/llvm-config-22, opt-22), which
+            # find_llvm_config and the default OPT (opt-22) already pick up - no PATH/OPT tweak needed.
+            gem install bundler --no-document
+            bundle install
+            (cd ext/ruby-llvm-support && bundle exec rake)
+            bundle exec rake
+            bundle exec rake test:samples
+          '
+
+  test-riscv-alpine:
+    runs-on: ubuntu-24.04-riscv
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build + test in Alpine edge (musl, llvm 22)
+      # TODO: ensure all runs fail if one of the commands fails
+        run: |
+          docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w alpine:edge sh -euxc '
+            apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
+            # Alpine puts versioned tools on PATH (/usr/bin/llvm-config-22 -> found by find_llvm_config),
+            # but names opt "opt22" (no dash), so the default OPT (opt-22) misses - set it explicitly.
+            export OPT=opt22
+            gem install bundler --no-document
+            bundle install
+            (cd ext/ruby-llvm-support && bundle exec rake)
+            bundle exec rake
+            bundle exec rake test:samples
+          '
+
 # Still uncovered: mingw32 and cygwin-32 (no 32-bit ruby in setup-ruby / cygwin-install-action;
 # both also top out at LLVM 21, so they belong on the llvm-21 branch), msys proper (as opposed to
-# the mingw64 toolchain the matrix already uses), ppc64le and sparc64 (qemu-only, and sparc64 is
-# the only big-endian target worth adding if byte-order coverage is wanted).
+# the mingw64 toolchain the matrix already uses), and sparc64 - see the s390x note above for why
+# big-endian coverage goes through s390x instead.
