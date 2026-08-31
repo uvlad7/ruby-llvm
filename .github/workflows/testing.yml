@@ -342,7 +342,9 @@ jobs:
   test-ffi-old:
     runs-on: ubuntu-24.04
     env:
-      BUNDLE_GEMFILE: gemfiles/Gemfile-ffi-old
+      # absolute: the support-library step cds into ext/ruby-llvm-support, and a relative
+      # BUNDLE_GEMFILE would be resolved from there
+      BUNDLE_GEMFILE: ${{ github.workspace }}/gemfiles/Gemfile-ffi-old
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install LLVM
