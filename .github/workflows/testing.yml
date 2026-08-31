@@ -299,6 +299,10 @@ jobs:
       matrix:
         include:
           - {label: 'Debian glibc armv7', image: 'arm32v7/debian:testing', platform: 'linux/arm/v7'}
+          # armv7 on both libcs: the JIT behaves differently across them. MCJIT hangs on musl
+          # armv7 (see mcjit_supported?) while the same suite passes on glibc armv7, so testing
+          # only one of the two would have missed it entirely.
+          - {label: 'Alpine musl armv7', image: 'arm32v7/alpine:edge', platform: 'linux/arm/v7'}
           - {label: 'Debian glibc ppc64le', image: 'ppc64le/debian:testing', platform: 'linux/ppc64le'}
           # The only big-endian target here: byte order shows up in FFI struct packing and in
           # how IR constants are laid out, and nothing else in this matrix would catch it.
@@ -314,10 +318,16 @@ jobs:
         run: |
           docker run --rm --platform ${{ matrix.platform }} -v "$GITHUB_WORKSPACE":/w -w /w \
             ${{ matrix.image }} sh -euxc '
-              apt-get update
-              apt-get install -y --no-install-recommends ruby ruby-dev build-essential \
-                llvm-22 llvm-22-dev libclang-common-22-dev libffi-dev git ca-certificates
-              export OPT=opt-22
+              if command -v apk >/dev/null; then
+                apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
+                # Alpine names opt "opt22" (no dash), so the default OPT (opt-22) misses.
+                export OPT=opt22
+              else
+                apt-get update
+                apt-get install -y --no-install-recommends ruby ruby-dev build-essential \
+                  llvm-22 llvm-22-dev libclang-common-22-dev libffi-dev git ca-certificates
+                export OPT=opt-22
+              fi
               command -v bundle >/dev/null || gem install bundler --no-document
               bundle config set --local force_ruby_platform true
               bundle install
