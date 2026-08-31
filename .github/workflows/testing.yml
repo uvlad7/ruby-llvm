@@ -5,6 +5,7 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -231,6 +232,7 @@ jobs:
   # Distro containers cover the libc/word-size axes the hosted runners cannot: musl, and 32-bit
   # x86. Each installs the distro's own llvm-22 rather than apt.llvm.org, so the bindings are
   # exercised against however that distro packaged it.
+  # x86 containers execute natively, so these are cheap enough to run on every PR.
   test-container:
     runs-on: ubuntu-latest
     strategy:
@@ -241,16 +243,8 @@ jobs:
           - {label: 'Alpine musl x86_64', image: 'alpine:edge', platform: 'linux/amd64'}
           # 32-bit x86: half-width pointers, and the i386 ABI the JIT stack-realign work targets.
           - {label: 'Debian glibc i386', image: 'i386/debian:testing', platform: 'linux/386'}
-          # 32-bit arm, via qemu; slowest of the three, so it runs last.
-          - {label: 'Debian glibc armv7', image: 'arm32v7/debian:testing', platform: 'linux/arm/v7'}
           # musl on 32-bit, so the two axes meet rather than only being covered separately.
           - {label: 'Alpine musl i386', image: 'i386/alpine:edge', platform: 'linux/386'}
-          - {label: 'Debian glibc ppc64le', image: 'ppc64le/debian:testing', platform: 'linux/ppc64le'}
-          # The only big-endian target here: byte order shows up in FFI struct packing and in
-          # how IR constants are laid out, and nothing else in this matrix would catch it.
-          # sparc64 would do as well but cannot run: qemu binfmt (tonistiigi/binfmt) has no
-          # sparc64, and the NetBSD/OpenBSD VMs that do offer it carry pkgsrc LLVM 19, not 22.
-          - {label: 'Debian glibc s390x (big-endian)', image: 's390x/debian:testing', platform: 'linux/s390x'}
     name: ${{ matrix.label }}
     timeout-minutes: 60
     steps:
@@ -281,8 +275,71 @@ jobs:
               bundle exec rake test:samples
             '
 
+  # qemu-emulated, so minutes-per-job rather than seconds. Skipped on pull requests; runs on
+  # pushes to master and on manual dispatch.
+  test-container-emulated:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {label: 'Debian glibc armv7', image: 'arm32v7/debian:testing', platform: 'linux/arm/v7'}
+          - {label: 'Debian glibc ppc64le', image: 'ppc64le/debian:testing', platform: 'linux/ppc64le'}
+          # The only big-endian target here: byte order shows up in FFI struct packing and in
+          # how IR constants are laid out, and nothing else in this matrix would catch it.
+          # sparc64 would do as well but cannot run: qemu binfmt (tonistiigi/binfmt) has no
+          # sparc64, and the NetBSD/OpenBSD VMs that do offer it carry pkgsrc LLVM 19, not 22.
+          - {label: 'Debian glibc s390x (big-endian)', image: 's390x/debian:testing', platform: 'linux/s390x'}
+    name: ${{ matrix.label }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@v3
+      - name: Build + test
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} -v "$GITHUB_WORKSPACE":/w -w /w \
+            ${{ matrix.image }} sh -euxc '
+              apt-get update
+              apt-get install -y --no-install-recommends ruby ruby-dev build-essential \
+                llvm-22 llvm-22-dev libclang-common-22-dev libffi-dev git ca-certificates
+              export OPT=opt-22
+              gem install bundler --no-document
+              bundle config set --local force_ruby_platform true
+              bundle install
+              (cd ext/ruby-llvm-support && bundle exec rake)
+              bundle exec rake
+              bundle exec rake test:samples
+            '
+
+  # An older ffi than the resolver would pick, to keep LLVM.inject_llvm_libs honest: it reuses a
+  # single dlopen handle by reading ffi's @ffi_libs, so a change there must fail loudly rather
+  # than silently degrading to per-binding ffi_lib.
+  test-ffi-old:
+    runs-on: ubuntu-24.04
+    env:
+      BUNDLE_GEMFILE: gemfiles/Gemfile-ffi-old
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install LLVM
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+      - run: bundle exec ruby -e 'require "ffi"; abort("wrong ffi") unless FFI::VERSION == "1.16.3"; puts "ffi #{FFI::VERSION}"'
+        name: "Confirm the pin took"
+      - run: cd ext/ruby-llvm-support && bundle exec rake
+        name: "Build support library"
+      - run: bundle exec rake
+        name: "Run tests"
+
   # FreeBSD is not a hosted runner; cross-platform-actions boots a VM image.
   test-freebsd:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -307,6 +364,7 @@ jobs:
   # Both openSUSE (glibc) and Alpine (musl) ship llvm-22 for riscv64 built rv64gc. Run via
   # `docker run --platform linux/riscv64` (forces the riscv64 image; checkout stays on the host).
   test-riscv-opensuse:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-riscv
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -327,6 +385,7 @@ jobs:
           '
 
   test-riscv-alpine:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-riscv
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

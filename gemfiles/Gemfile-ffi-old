@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+# CI resolves the newest ffi every time, so nothing exercises an older one. That matters for
+# LLVM.inject_llvm_libs, which reuses a single dlopen handle by reading ffi's @ffi_libs: if the
+# ivar ever differed, the single-handle guarantee would quietly degrade to per-binding ffi_lib
+# and reintroduce the split-libLLVM problem it exists to prevent.
+#
+# 1.16.3 rather than the gemspec's ~> 1.13 floor: 1.13 predates Ruby 3.1 and no longer builds on
+# the Rubies tested here, so the true floor stays unexercised.
+source "https://rubygems.org"
+
+gemspec path: ".."
+
+gem "ffi", "1.16.3"
