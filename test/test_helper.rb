@@ -9,24 +9,31 @@ rescue LoadError
   # Ignore ruby-debug is case it's not installed
 end
 
-begin
-  require 'simplecov'
+# SimpleCov drives coverage through TracePoint's :call event, which TruffleRuby does not
+# implement -- requiring it there aborts the whole suite before a single test runs. Coverage
+# from one runtime is enough, so skip it rather than lose the run.
+if RUBY_ENGINE == 'truffleruby'
+  warn 'Proceeding without SimpleCov: TruffleRuby has no TracePoint :call event.'
+else
+  begin
+    require 'simplecov'
 
-  unless SimpleCov::Configuration.method_defined?(:skip)
-    mod = SimpleCov::Configuration #: as untyped
-    mod.send(:alias_method, :skip, :add_filter)
+    unless SimpleCov::Configuration.method_defined?(:skip)
+      mod = SimpleCov::Configuration #: as untyped
+      mod.send(:alias_method, :skip, :add_filter)
+    end
+    SimpleCov.start do
+      skip "/test/"
+      skip "/lib/llvm/transforms/scalar.rb"
+      skip "/lib/llvm/transforms/ipo.rb"
+      skip "/lib/llvm/transforms/vectorize.rb"
+      skip "/lib/llvm/transforms/utils.rb"
+      skip "/lib/llvm/transforms/builder.rb"
+      skip "/lib/llvm/core/pass_manager.rb"
+    end
+  rescue LoadError
+    warn "Proceeding without SimpleCov. gem install simplecov on supported platforms."
   end
-  SimpleCov.start do
-    skip "/test/"
-    skip "/lib/llvm/transforms/scalar.rb"
-    skip "/lib/llvm/transforms/ipo.rb"
-    skip "/lib/llvm/transforms/vectorize.rb"
-    skip "/lib/llvm/transforms/utils.rb"
-    skip "/lib/llvm/transforms/builder.rb"
-    skip "/lib/llvm/core/pass_manager.rb"
-  end
-rescue LoadError
-  warn "Proceeding without SimpleCov. gem install simplecov on supported platforms."
 end
 
 require "minitest/autorun"
@@ -150,6 +157,15 @@ def jit_symbol_pointer(name)
   nil
 end
 
+# Find a symbol exported by the running process itself -- notably libruby's, which live
+# neither in libc nor libm. Returns nil when Ruby is statically linked without exported
+# symbols, which is a legitimate configuration rather than a failure.
+def process_symbol_pointer(name)
+  FFI::DynamicLibrary.open(nil, FFI::DynamicLibrary::RTLD_LAZY).find_function(name)
+rescue LoadError, FFI::NotFoundError
+  nil
+end
+
 # Make a libc/libm symbol resolvable by JIT'd code (MCJIT, or LLJIT's process generator).
 # LLVMAddSymbol lands in LLVM's explicit-symbol table, which SearchForAddressOfSymbol consults
 # ahead of the process, so this both adds what is missing and pins what is ambiguous.
@@ -171,10 +187,12 @@ JIT_ENGINES = [
   *(FFI::Platform::ARCH.to_s.start_with?('riscv') ? [] : [:mcjit]),
 ].freeze #: Array[Symbol]
 
-# Engine a test runs under. Parametrized classes override this; anything else gets the first
-# available engine.
+# Engine a test runs under. Parametrized classes override this. Everything else keeps MCJIT,
+# the engine those suites have always used: defaulting to JIT_ENGINES.first silently moved
+# every non-parametrized suite onto LLJIT, which is how LinkerTestCase started failing to
+# materialize symbols on Windows.
 def jit_engine
-  JIT_ENGINES.first
+  JIT_ENGINES.include?(:mcjit) ? :mcjit : JIT_ENGINES.first
 end
 
 # Build one test class per JIT engine from a module of test methods, so a failure names the

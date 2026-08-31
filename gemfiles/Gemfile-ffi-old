@@ -5,10 +5,9 @@
 # ivar ever differed, the single-handle guarantee would quietly degrade to per-binding ffi_lib
 # and reintroduce the split-libLLVM problem it exists to prevent.
 #
-# 1.16.3 rather than the gemspec's ~> 1.13 floor: 1.13 predates Ruby 3.1 and no longer builds on
-# the Rubies tested here, so the true floor stays unexercised.
+# Pinned to the gemspec's floor exactly, so the lowest supported ffi is the one CI proves.
 source "https://rubygems.org"
 
 gemspec path: ".."
 
-gem "ffi", "1.16.3"
+gem "ffi", "1.16.0"

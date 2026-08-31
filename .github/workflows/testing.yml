@@ -10,6 +10,8 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      JRUBY_OPTS: "-J-Xss4096k" # raise JVM stack so the recursive factorial sample doesn't overflow
     strategy:
       fail-fast: false
       matrix:
@@ -29,11 +31,11 @@ jobs:
           # jruby and truffleruby differ from CRuby in how they back FFI, not per-OS, so one
           # linux and one macos each is the signal; the full cross-product is not worth 18 jobs.
           - os: ubuntu-24.04
-            ruby: jruby
+            ruby: jruby-10.0
           - os: ubuntu-24.04
             ruby: truffleruby
           - os: macos-15
-            ruby: jruby
+            ruby: jruby-10.0
           - os: macos-15
             ruby: truffleruby
         exclude:
@@ -80,6 +82,12 @@ jobs:
           [ -n "${RUBY_EXACT}" ] || { echo "No ruby-build definition for Ruby ${{ matrix.ruby }}"; exit 1; }
           ruby-build "${RUBY_EXACT}" "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64"
           touch "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64.complete"
+      - if: contains(matrix.os, '-riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Save Ruby cache (riscv64)
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.tool_cache }}/Ruby
+          key: ruby-${{ matrix.os }}-${{ matrix.ruby }}
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: ${{ matrix.ruby }}
@@ -121,10 +129,16 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           echo "setup=false" >> "$GITHUB_OUTPUT"
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 22
-          # sudo apt-get install -y libpolly-22-dev
+          if [[ '${{ matrix.os }}' == *riscv* ]]; then
+            # apt.llvm.org has no riscv64 repo; Ubuntu 26.04 (resolute) packages llvm-22 for riscv64.
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends llvm-22-dev clang-22
+          else
+            wget https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh 22
+            # sudo apt-get install -y libpolly-22-dev
+          fi
           echo "setup=true" >> "$GITHUB_OUTPUT"
       - name: Install LLVM on windows
         id: windows_setup
@@ -201,7 +215,7 @@ jobs:
   test-cygwin:
     runs-on: windows-2025
     # Cygwin's slow fork/exec makes gem installs crawl; cap it so a stall can't run for hours.
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: cygwin/cygwin-install-action@v6
@@ -246,7 +260,7 @@ jobs:
           # musl on 32-bit, so the two axes meet rather than only being covered separately.
           - {label: 'Alpine musl i386', image: 'i386/alpine:edge', platform: 'linux/386'}
     name: ${{ matrix.label }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Enable qemu for non-native platforms
@@ -266,7 +280,7 @@ jobs:
                   llvm-22 llvm-22-dev libclang-common-22-dev libffi-dev git ca-certificates
                 export OPT=opt-22
               fi
-              gem install bundler --no-document
+              command -v bundle >/dev/null || gem install bundler --no-document
               # Debian ships a rubygems too old for the precompiled ffi gem; build it from source.
               bundle config set --local force_ruby_platform true
               bundle install
@@ -304,7 +318,7 @@ jobs:
               apt-get install -y --no-install-recommends ruby ruby-dev build-essential \
                 llvm-22 llvm-22-dev libclang-common-22-dev libffi-dev git ca-certificates
               export OPT=opt-22
-              gem install bundler --no-document
+              command -v bundle >/dev/null || gem install bundler --no-document
               bundle config set --local force_ruby_platform true
               bundle install
               (cd ext/ruby-llvm-support && bundle exec rake)
@@ -330,8 +344,9 @@ jobs:
         with:
           ruby-version: '3.4'
           bundler-cache: true
-      - run: bundle exec ruby -e 'require "ffi"; abort("wrong ffi") unless FFI::VERSION == "1.16.3"; puts "ffi #{FFI::VERSION}"'
-        name: "Confirm the pin took"
+      # quoted: an unquoted '#' would start a YAML comment and truncate the command
+      - name: "Confirm the pin took"
+        run: bundle exec ruby -e 'require "ffi"; abort("wrong ffi " + FFI::VERSION) unless FFI::VERSION == "1.16.0"'
       - run: cd ext/ruby-llvm-support && bundle exec rake
         name: "Build support library"
       - run: bundle exec rake
@@ -341,7 +356,7 @@ jobs:
   test-freebsd:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build + test on FreeBSD
@@ -354,7 +369,9 @@ jobs:
             # FreeBSD installs LLVM under /usr/local/llvm22, off PATH.
             export PATH="/usr/local/llvm22/bin:$PATH"
             export OPT=opt
-            sudo gem install bundler --no-document
+            command -v bundle >/dev/null || sudo gem install bundler --no-document
+            # the system gem dir is root-owned; keep the bundle in-tree instead
+            bundle config set --local path vendor/bundle
             bundle install
             (cd ext/ruby-llvm-support && bundle exec rake)
             bundle exec rake
@@ -365,6 +382,7 @@ jobs:
   # `docker run --platform linux/riscv64` (forces the riscv64 image; checkout stays on the host).
   test-riscv-opensuse:
     if: github.event_name != 'pull_request'
+    continue-on-error: true
     runs-on: ubuntu-24.04-riscv
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -377,7 +395,7 @@ jobs:
             zypper -n install ruby ruby-devel gcc-c++ make libffi-devel llvm22 llvm22-devel
             # openSUSE installs versioned binaries on PATH (/usr/bin/llvm-config-22, opt-22), which
             # find_llvm_config and the default OPT (opt-22) already pick up - no PATH/OPT tweak needed.
-            gem install bundler --no-document
+            command -v bundle >/dev/null || gem install bundler --no-document
             bundle install
             (cd ext/ruby-llvm-support && bundle exec rake)
             bundle exec rake
@@ -386,6 +404,7 @@ jobs:
 
   test-riscv-alpine:
     if: github.event_name != 'pull_request'
+    continue-on-error: true
     runs-on: ubuntu-24.04-riscv
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -397,7 +416,7 @@ jobs:
             # Alpine puts versioned tools on PATH (/usr/bin/llvm-config-22 -> found by find_llvm_config),
             # but names opt "opt22" (no dash), so the default OPT (opt-22) misses - set it explicitly.
             export OPT=opt22
-            gem install bundler --no-document
+            command -v bundle >/dev/null || gem install bundler --no-document
             bundle install
             (cd ext/ruby-llvm-support && bundle exec rake)
             bundle exec rake

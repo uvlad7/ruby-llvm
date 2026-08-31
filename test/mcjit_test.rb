@@ -73,12 +73,16 @@ class MCJITTestCase < Minitest::Test
   def test_accessors
     main_mod = LLVM::Module.new('main')
     engine = LLVM::MCJITCompiler.new(main_mod, :opt_level => 0)
-    assert_match(/^e-/, engine.data_layout.to_s)
+    # LLVM's data layout opens with the byte order: 'e' little-endian, 'E' big-endian. Assert
+    # the one this host actually is rather than assuming little-endian, which s390x is not.
+    endianness = [1].pack('L').unpack1('N') == 1 ? /\AE-/ : /\Ae-/
+    assert_match(endianness, engine.data_layout.to_s)
     matcher = case FFI::Platform::OS
     when 'darwin'
       /apple-darwin/
     when 'linux'
-      /gnu/
+      # the libc is part of the triple: -gnu on glibc, -musl on Alpine and friends
+      /linux-(gnu|musl)/
     when 'windows'
       /windows-gnu|windows-msvc/
     when 'cygwin'
