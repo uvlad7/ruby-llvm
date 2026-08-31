@@ -126,24 +126,39 @@ def underscore_mangled_symbols?
   FFI::Platform::ADDRESS_SIZE == 32 && (FFI::Platform::IS_WINDOWS || cygwin?)
 end
 
-# Register libc symbols under the names the JIT will look for. No-op on Unix and 64-bit
-# Windows, which auto-resolve; there the whole method returns early.
+# Find a symbol for JIT'd code to call: libc first, then libm. Most libc functions resolve
+# themselves, but libm (sin and friends) is not in MCJIT's default search, so it has to be
+# registered explicitly.
 #
-# Cygwin needs the plain name registered at any bitness: the process exports two getenvs --
-# cygwin1.dll's, returning POSIX paths, which is what Ruby's ENV agrees with, and the Windows
-# CRT's (msvcrt/ucrtbase), returning native paths -- and MCJIT's process-wide search binds
-# whichever it finds first, so test_external_string saw the native form on some runs and the
-# POSIX form on others. LLVMAddSymbol lands in LLVM's explicit-symbol table, which
-# SearchForAddressOfSymbol consults ahead of the process, pinning it to FFI::Library::LIBC
-# (cygwin1.dll) and making resolution deterministic.
-def register_libc_symbol_for_jit(name)
-  return unless underscore_mangled_symbols? || cygwin?
+# libc is FFI::Library::LIBC deliberately rather than whatever the process search finds first:
+# on Cygwin that is cygwin1.dll, and the process ALSO exports the Windows CRT's (msvcrt /
+# ucrtbase) versions. The two disagree -- cygwin1.dll's getenv returns the POSIX PATH that
+# Ruby's ENV agrees with, the CRT's returns the native one -- and MCJIT bound whichever it
+# reached first, so test_external_string saw either form depending on the run.
+def jit_symbol_pointer(name)
+  [FFI::Library::LIBC, 'm'].each do |lib|
+    dl = begin
+      # load_library applies FFI's platform name mapping ('m' -> libm.so.6 etc); the public
+      # .open takes an already-mapped filename.
+      FFI::DynamicLibrary.send(:load_library, lib, nil)
+    rescue LoadError
+      next
+    end
+    ptr = dl&.find_function(name)
+    return ptr if ptr
+  end
+  nil
+end
 
-  ptr = FFI::DynamicLibrary.open(FFI::Library::LIBC, FFI::DynamicLibrary::RTLD_LAZY).find_function(name)
+# Make a libc/libm symbol resolvable by JIT'd code (MCJIT, or LLJIT's process generator).
+# LLVMAddSymbol lands in LLVM's explicit-symbol table, which SearchForAddressOfSymbol consults
+# ahead of the process, so this both adds what is missing and pins what is ambiguous.
+# i386 COFF (Windows/Cygwin) mangles C symbols with a leading underscore.
+def register_jit_symbol(name)
+  ptr = jit_symbol_pointer(name)
   return unless ptr
 
-  LLVM::C.add_symbol("_#{name}", ptr) if underscore_mangled_symbols?
-  LLVM::C.add_symbol(name, ptr) if cygwin?
+  LLVM::C.add_symbol(underscore_mangled_symbols? ? "_#{name}" : name, ptr)
 end
 
 # JIT engines the suite exercises.

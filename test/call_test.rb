@@ -61,7 +61,7 @@ module CallTestCase
   end
 
   def test_external
-    register_libc_symbol_for_jit('abs')
+    register_jit_symbol('abs')
     test_module = define_module("test_module") do |host_module|
       external = host_module.functions.add("abs", [LLVM::Int], LLVM::Int)
       define_function(host_module, "test_function", [LLVM::Int], LLVM::Int) do |builder, function, *arguments|
@@ -74,7 +74,7 @@ module CallTestCase
   end
 
   def test_external_string
-    register_libc_symbol_for_jit('getenv')
+    register_jit_symbol('getenv')
     test_module = define_module("test_module") do |host_module|
       global = host_module.globals.add(LLVM::Array(LLVM::Int8, 5), "path")
       global.linkage = :internal
