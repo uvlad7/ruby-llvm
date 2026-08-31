@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class CallTestCase < Minitest::Test
+module CallTestCase
   def setup
     LLVM.init_jit
   end
@@ -188,3 +188,5 @@ class CallTestCase < Minitest::Test
     # assert_equal 42, run_function_on_module(test_module, "caller_fun").to_i
   end
 end
+
+define_jit_cases(CallTestCase)

@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class BasicOperationsTestCase < Minitest::Test
+module BasicOperationsTestCase
   def setup
     LLVM.init_jit
   end
@@ -57,3 +57,5 @@ class BasicOperationsTestCase < Minitest::Test
     end
   end
 end
+
+define_jit_cases(BasicOperationsTestCase)

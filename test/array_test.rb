@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class ArrayTestCase < Minitest::Test
+module ArrayTestCase
   def test_constant_array_from_size
     array = LLVM::ConstantArray.const(LLVM::Int, 2) { |i| LLVM::Int(i) }
     check_constant_array(array)
@@ -120,3 +120,5 @@ class ArrayTestCase < Minitest::Test
     assert_equal "[0 x i32] zeroinitializer", array.to_s
   end
 end
+
+define_jit_cases(ArrayTestCase)

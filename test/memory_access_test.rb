@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class MemoryAccessTestCase < Minitest::Test
+module MemoryAccessTestCase
   def test_simple_memory_access
     assert_equal 1 + 2, simple_memory_access_function(1, 2).to_i
   end
@@ -42,3 +42,5 @@ class MemoryAccessTestCase < Minitest::Test
     end
   end
 end
+
+define_jit_cases(MemoryAccessTestCase)

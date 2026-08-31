@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class DoubleTestCase < Minitest::Test
+module DoubleTestCase
   def setup
     LLVM.init_jit
   end
@@ -88,7 +88,7 @@ class DoubleTestCase < Minitest::Test
       builder.ret(builder.fadd(p0, LLVM::Double(1.0)))
     end
 
-    engine = LLVM::MCJITCompiler.new(mod)
+    engine = jit_engine_for(mod)
 
     arg = 5.0
     function = mod.functions["test"] #: as !nil
@@ -102,3 +102,5 @@ class DoubleTestCase < Minitest::Test
     assert_in_delta(Math.sin(1.0), actual, 1e-10)
   end
 end
+
+define_jit_cases(DoubleTestCase)

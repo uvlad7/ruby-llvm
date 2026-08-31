@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class ConversionsTestCase < Minitest::Test
+module ConversionsTestCase
   def setup
     LLVM.init_jit
   end
@@ -93,3 +93,5 @@ class ConversionsTestCase < Minitest::Test
     end
   end
 end
+
+define_jit_cases(ConversionsTestCase)

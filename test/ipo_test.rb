@@ -41,6 +41,8 @@ class IPOTestCase < Minitest::Test
     assert_includes fns, main
 
     # optimize
+    # only borrows a TargetMachine to run passes; nothing is executed, so this is
+    # not a JIT-engine test and is not parametrized over engines
     engine = LLVM::MCJITCompiler.new(mod)
     pass_builder = LLVM::PassBuilder.new
 

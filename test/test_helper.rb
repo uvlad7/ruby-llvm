@@ -40,13 +40,16 @@ require "llvm/core"
 require "llvm/lljit"
 require "llvm/execution_engine"
 
+# Top level rather than inside Minitest::Test: the JIT suites are modules included into
+# generated per-engine classes, and constant lookup from a module body does not walk the
+# including class's ancestors.
+LLVM_SIGNED = true
+LLVM_UNSIGNED = false
+
+LLVM_FALSE = 0
+LLVM_TRUE = 1
+
 class Minitest::Test
-  LLVM_SIGNED = true
-  LLVM_UNSIGNED = false
-
-  LLVM_FALSE = 0
-  LLVM_TRUE = 1
-
   private
 
   def with_function(arguments, retty, &block)
@@ -143,19 +146,61 @@ def register_libc_symbol_for_jit(name)
   LLVM::C.add_symbol(name, ptr) if cygwin?
 end
 
-def run_function_on_module(host_module, function_name, *argument_values)
+# JIT engines the suite exercises.
+#
+# LLJIT (ORC) runs everywhere: it is where upstream LLVM is heading, it is the only engine that
+# works on some targets, and testing it only as a fallback left it barely covered. MCJIT runs
+# wherever it is not known-broken -- on riscv64 its RuntimeDyld mis-relocates globals.
+JIT_ENGINES = [
+  :lljit,
+  *(FFI::Platform::ARCH.to_s.start_with?('riscv') ? [] : [:mcjit]),
+].freeze #: Array[Symbol]
+
+# Engine a test runs under. Parametrized classes override this; anything else gets the first
+# available engine.
+def jit_engine
+  JIT_ENGINES.first
+end
+
+# Build one test class per JIT engine from a module of test methods, so a failure names the
+# engine it happened under -- ArrayTestCase_LLJIT#test_x rather than a bare ArrayTestCase#test_x
+# that gives no clue which engine broke.
+#: (Module) -> void
+def define_jit_cases(mod)
+  JIT_ENGINES.each do |engine|
+    klass = Class.new(Minitest::Test) { include mod }
+    klass.send(:define_method, :jit_engine) { engine }
+    Object.const_set("#{mod.name}_#{engine.to_s.upcase}", klass)
+  end
+end
+
+# Build the engine for this test and add host_module to it. Both engines answer
+# #run_function(fun, *args) and #dispose.
+def jit_engine_for(host_module)
   # i386 codegen assumes a 16-byte-aligned stack, but Ruby calls in 4-byte aligned, so JIT'd
   # functions that call out crash; make each realign its own stack. Real callers own this.
   if underscore_mangled_symbols?
     stackrealign = LLVM::Attribute.string("stackrealign", "")
     host_module.functions.each { |fn| fn.add_attribute(stackrealign) }
   end
-  LLVM::MCJITCompiler
-    .new(host_module)
-    .run_function(
-      host_module.functions[function_name],
-      *argument_values #: as untyped
-    )
+
+  if jit_engine == :lljit
+    engine = LLVM::LLJit.new
+    engine.add_module(host_module)
+    engine
+  else
+    LLVM::MCJITCompiler.new(host_module)
+  end
+end
+
+def run_function_on_module(host_module, function_name, *argument_values)
+  engine = jit_engine_for(host_module)
+  engine.run_function(
+    host_module.functions[function_name],
+    *argument_values #: as untyped
+  )
+ensure
+  engine&.dispose
 end
 
 def run_function(argument_types, argument_values, return_type, &block)
