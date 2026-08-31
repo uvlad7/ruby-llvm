@@ -29,7 +29,7 @@ module LLVM
     module TargetModule
       extend FFI::Library
 
-      ffi_lib LLVM::LIB_NAMES
+      LLVM.inject_llvm_libs(self)
 
       #: (*untyped) -> void
       def self.safe_attach_function(*args)

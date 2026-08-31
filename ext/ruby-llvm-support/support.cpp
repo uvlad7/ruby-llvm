@@ -154,5 +154,22 @@ extern "C" {
     os.flush();
     return owned_message(buf);
   }
-}
 
+  // Force resolving to the *real* libLLVM address rather than a local import thunk: on MSVC,
+  // taking the address of a dllimport function yields the IAT target (the function inside
+  // LLVM-C.dll); a plain declaration yields a jmp thunk inside this DLL instead. On ELF/Mach-O
+  // &fn is already the real address, so a plain extern suffices.
+#if defined(_WIN32)
+  __declspec(dllimport) void LLVMGetVersion(unsigned *Major, unsigned *Minor, unsigned *Patch);
+#else
+  void LLVMGetVersion(unsigned *Major, unsigned *Minor, unsigned *Patch);
+#endif
+
+  // Address of LLVMGetVersion (a pure C-API query, fixed name, present since LLVM 16) as resolved
+  // by THIS support library. Matches the ffi-loaded libLLVM's own resolution of the same symbol
+  // when both bind to a single libLLVM image; a different value means a second libLLVM copy is
+  // loaded, i.e. a split target/asm registry.
+  LLVM_SUPPORT_API const void* LLVMSupportGetVersionAddr() {
+    return reinterpret_cast<const void*>(&LLVMGetVersion);
+  }
+}

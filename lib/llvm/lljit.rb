@@ -55,7 +55,7 @@ module LLVM
       extend FFI::Library
 
       ffi_lib_flags(:lazy, :global)
-      ffi_lib LLVM::LIB_NAMES
+      LLVM.inject_llvm_libs(self)
       attach_function :create_lljit_builder, :LLVMOrcCreateLLJITBuilder, [], :pointer
       attach_function :dispose_lljit_builder, :LLVMOrcDisposeLLJITBuilder, [:pointer], :void
 

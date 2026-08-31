@@ -44,6 +44,11 @@ module LLVM
       attach_function :print_module_to_string_debug, :LLVMPrintModuleToStringDebug, [:pointer], LLVM::OwnedString
       attach_function :print_value_to_string_debug, :LLVMPrintValueToStringDebug, [:pointer], LLVM::OwnedString
       attach_function :print_type_to_string_debug, :LLVMPrintTypeToStringDebug, [:pointer], LLVM::OwnedString
+
+      # Real address of LLVMGetVersion as this support lib links it (dllimport on MSVC, so the IAT
+      # target rather than a local thunk). Compared against the ffi-loaded libLLVM's own resolution
+      # in LLVM.assert_support_shares_llvm! to detect a split libLLVM instance.
+      attach_function :get_version_addr, :LLVMSupportGetVersionAddr, [], :pointer
     end
   end
 
