@@ -18,13 +18,11 @@ module LLVM
       end
 
       # global_prefix is '\0' on ELF, '_' on Mach-O / i386 COFF; a null filter accepts all.
-      FFI::MemoryPointer.new(FFI.type_size(:pointer)) do |gen_out|
-        err = C.create_process_generator(gen_out, C.get_global_prefix(@ptr), nil, nil)
-        unless err.null?
-          dispose
-          raise_if_error(err)
-        end
-        C.dylib_add_generator(C.get_main_jit_dylib(@ptr), gen_out.read_pointer)
+      begin
+        add_generator { |out| C.create_process_generator(out, C.get_global_prefix(@ptr), nil, nil) }
+      rescue StandardError
+        dispose
+        raise
       end
     end
 
@@ -38,6 +36,26 @@ module LLVM
       # dispose or reference ts_mod after this call, even on error.
       err = C.add_ir_module(@ptr, C.get_main_jit_dylib(@ptr), ts_mod)
       raise_if_error(err)
+    end
+
+    # Make a shared library's symbols visible to JIT'd code. The process generator installed in
+    # #initialize only sees what the running process already exports, so anything loaded later --
+    # or never loaded at all -- has to be added explicitly.
+    #: (String) -> void
+    def add_library(path)
+      add_generator do |out|
+        C.create_dylib_path_generator(out, path, C.get_global_prefix(@ptr), nil, nil)
+      end
+    end
+
+    # As #add_library, but for a static archive (.a). Needed for the compiler runtime: builtins
+    # like __muldi3 and __adddf3, which LLVM emits as libcalls on targets lacking the instruction,
+    # live in libgcc.a or libclang_rt.builtins-*.a and are absent from libgcc_s.so, so no dynamic
+    # generator can reach them. Without this, JIT'd float or 64-bit arithmetic fails to
+    # materialize on soft-float targets such as riscv64.
+    #: (String) -> void
+    def add_static_library(path)
+      add_generator { |out| C.create_static_lib_generator(out, C.get_obj_linking_layer(@ptr), path) }
     end
 
     # Look up a compiled symbol by name; returns its address as an Integer.
@@ -91,6 +109,16 @@ module LLVM
 
     private
 
+    # Build a generator with the given block and attach it to the main dylib, which takes
+    # ownership. The block receives an out-parameter and returns an LLVMErrorRef.
+    #: { (FFI::MemoryPointer) -> FFI::Pointer } -> void
+    def add_generator(&)
+      FFI::MemoryPointer.new(FFI.type_size(:pointer)) do |out|
+        raise_if_error(yield(out))
+        C.dylib_add_generator(C.get_main_jit_dylib(@ptr), out.read_pointer)
+      end
+    end
+
     # Map an LLVM type to the FFI type FFI::Function expects (mirrors ExecutionEngine#convert_type).
     def convert_type(type)
       case type.kind
@@ -135,6 +163,14 @@ module LLVM
       attach_function :create_process_generator,
                       :LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess,
                       [:pointer, :char, :pointer, :pointer], :pointer
+      attach_function :create_dylib_path_generator,
+                      :LLVMOrcCreateDynamicLibrarySearchGeneratorForPath,
+                      [:pointer, :string, :char, :pointer, :pointer], :pointer
+      # takes the object linking layer rather than a triple, despite what the header comment says
+      attach_function :create_static_lib_generator,
+                      :LLVMOrcCreateStaticLibrarySearchGeneratorForPath,
+                      [:pointer, :pointer, :string], :pointer
+      attach_function :get_obj_linking_layer, :LLVMOrcLLJITGetObjLinkingLayer, [:pointer], :pointer
       attach_function :dylib_add_generator, :LLVMOrcJITDylibAddGenerator, [:pointer, :pointer], :void
 
       # LLVMGetErrorMessage consumes the error and returns a heap char* the caller must free
