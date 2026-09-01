@@ -11,9 +11,20 @@ module LLVM
   class LLJit
     # Create an LLJIT and wire its main dylib to resolve symbols from the current process
     # (so JIT'd code can call puts/getenv/etc without manual registration).
-    def initialize
+    #
+    # target_machine overrides the host detection ORC would otherwise do, which is how you get a
+    # JIT for something other than exactly this CPU -- a generic CPU with no target features,
+    # say, so instruction selection falls back to libcalls the way it would on a machine lacking
+    # those extensions. ORC takes ownership of it: do not dispose or reuse it afterwards.
+    #: (?LLVM::TargetMachine?) -> void
+    def initialize(target_machine = nil)
+      builder = C.create_lljit_builder
+      if target_machine
+        jtmb = C.jtmb_from_target_machine(target_machine)
+        C.builder_set_jtmb(builder, jtmb)
+      end
       FFI::MemoryPointer.new(FFI.type_size(:pointer)) do |out|
-        raise_if_error(C.create_lljit(out, C.create_lljit_builder))
+        raise_if_error(C.create_lljit(out, builder))
         @ptr = out.read_pointer
       end
 
@@ -145,6 +156,13 @@ module LLVM
       LLVM.inject_llvm_libs(self)
 
       attach_function :create_lljit_builder, :LLVMOrcCreateLLJITBuilder, [], :pointer
+      # takes ownership of the TargetMachine; the JTMB is in turn owned by the builder
+      attach_function :jtmb_from_target_machine,
+                      :LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine,
+                      [:pointer], :pointer
+      attach_function :builder_set_jtmb,
+                      :LLVMOrcLLJITBuilderSetJITTargetMachineBuilder,
+                      [:pointer, :pointer], :void
       attach_function :create_lljit, :LLVMOrcCreateLLJIT, [:pointer, :pointer], :pointer
       attach_function :dispose_lljit, :LLVMOrcDisposeLLJIT, [:pointer], :pointer
 

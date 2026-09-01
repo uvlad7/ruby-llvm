@@ -208,6 +208,25 @@ JIT_ENGINES = [
   *(mcjit_supported? ? [:mcjit] : []),
 ].freeze #: Array[Symbol]
 
+# Codegen modes each engine is exercised in.
+#
+# :no_features builds the JIT against a target machine for the host triple but with a generic
+# CPU and an empty feature set, so instruction selection falls back to what the bare
+# architecture provides. Where an extension is optional that changes what gets emitted --
+# riscv64 without F/D lowers float arithmetic to libcalls (__adddf3 and friends), which is how
+# the missing compiler runtime was found -- and running it everywhere stops that depending on
+# which machine happened to pick up the job.
+#
+# Only LLJIT can do this. ORC takes a JITTargetMachineBuilder, so the target machine is ours to
+# choose; MCJIT's LLVMMCJITCompilerOptions carries only OptLevel, CodeModel, NoFramePointerElim,
+# EnableFastISel and a memory manager, with no way in for a CPU or feature string.
+JIT_MODES = [:default, :no_features].freeze #: Array[Symbol]
+
+# Codegen mode a test runs under; parametrized classes override it.
+def jit_mode
+  :default
+end
+
 # Engine a test runs under. Parametrized classes override this. Everything else keeps MCJIT,
 # the engine those suites have always used: defaulting to JIT_ENGINES.first silently moved
 # every non-parametrized suite onto LLJIT, which is how LinkerTestCase started failing to
@@ -221,11 +240,30 @@ end
 # that gives no clue which engine broke.
 #: (Module) -> void
 def define_jit_cases(mod)
-  JIT_ENGINES.each do |engine|
+  JIT_ENGINES.product(JIT_MODES).each do |engine, mode|
+    # MCJIT has no C API for a custom target machine, so it only runs in :default
+    next if mode == :no_features && engine != :lljit
+
     klass = Class.new(Minitest::Test) { include mod }
     klass.send(:define_method, :jit_engine) { engine }
-    Object.const_set("#{mod.name}_#{engine.to_s.upcase}", klass)
+    klass.send(:define_method, :jit_mode) { mode }
+    suffix = mode == :default ? engine.to_s.upcase : "#{engine.to_s.upcase}_NOFEATURES"
+    Object.const_set("#{mod.name}_#{suffix}", klass)
   end
+end
+
+# A target machine for this host's triple but with a generic CPU and no features. ORC takes
+# ownership of it, so build a fresh one per engine.
+#: -> LLVM::TargetMachine
+def generic_target_machine
+  triple = LLVM::C.get_default_target_triple
+  target_out = FFI::MemoryPointer.new(:pointer)
+  error_out = FFI::MemoryPointer.new(:pointer)
+  unless LLVM::C.get_target_from_triple(triple, target_out, error_out).zero?
+    raise "no target for #{triple}"
+  end
+
+  LLVM::Target.from_ptr(target_out.read_pointer).create_machine(triple, "generic", "")
 end
 
 # Build the engine for this test and add host_module to it. Both engines answer
@@ -239,7 +277,7 @@ def jit_engine_for(host_module)
   end
 
   if jit_engine == :lljit
-    engine = LLVM::LLJit.new
+    engine = LLVM::LLJit.new(jit_mode == :no_features ? generic_target_machine : nil)
     engine.add_module(host_module)
     engine
   else
