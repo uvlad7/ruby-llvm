@@ -442,6 +442,41 @@ jobs:
             bundle exec rake test:samples
           '
 
+  # EXPERIMENT, remove once it has answered: does MCJIT fail on riscv64 for the same reason
+  # LLJIT does?
+  #
+  # MCJIT is skipped on riscv64 on the strength of a comment saying RuntimeDyld "mis-relocates
+  # globals". LLJIT, which does run there, fails on four compiler-rt builtins that neither engine
+  # can reach (__muldi3, __addsf3, __adddf3, __floatunsisf -- they live in libgcc.a, not in any
+  # shared object). An unresolved symbol read as null looks exactly like a mis-relocated global,
+  # so the two explanations may be one.
+  #
+  # RL_FORCE_MCJIT=1 lifts the skip. What matters is WHICH tests fail:
+  #   - the same float and 64-bit-multiply ones LLJIT fails  -> one cause, and the comment is wrong
+  #   - different ones, e.g. global access                   -> the original diagnosis stands
+  #
+  # continue-on-error, since it is expected to fail either way.
+  test-riscv-mcjit-probe:
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    runs-on: ubuntu-24.04-riscv
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Probe MCJIT on riscv64 (Alpine, musl, llvm 22)
+        run: |
+          docker run --rm --platform linux/riscv64 -e RL_FORCE_MCJIT=1 \
+            -v "$GITHUB_WORKSPACE":/w -w /w alpine:edge sh -euxc '
+              apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
+              export OPT=opt22
+              command -v bundle >/dev/null || gem install bundler --no-document
+              bundle install
+              (cd ext/ruby-llvm-support && bundle exec rake)
+              # only the JIT-executing suites; the point is which of them break
+              bundle exec rake test || true
+              echo "--- where is the compiler runtime on this image? ---"
+              find / -name "libgcc*.a" -o -name "libclang_rt.builtins*" 2>/dev/null | head
+            '
+
 # Still uncovered here, and why:
 #
 # - sparc64: qemu binfmt (tonistiigi/binfmt) has no sparc64 emulator, and the NetBSD/OpenBSD VMs

@@ -190,6 +190,9 @@ end
 # whole CI job, which is why this errs toward skipping.
 #: -> bool
 def mcjit_supported?
+  # Escape hatch for probing a platform that is skipped here, without editing this list. Set
+  # RL_FORCE_MCJIT=1 to find out what MCJIT actually does on it -- see test-riscv-mcjit-probe.
+  return true if ENV['RL_FORCE_MCJIT'] == '1'
   return false if FFI::Platform::ARCH.to_s.start_with?('riscv')
 
   # 32-bit arm only: aarch64 is fine, and it also reports an 'arm'-prefixed arch on some
