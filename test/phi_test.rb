@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class PhiTest < Minitest::Test
+module PhiTest
   def setup
     LLVM.init_jit
   end
@@ -34,3 +34,5 @@ class PhiTest < Minitest::Test
     end
   end
 end
+
+define_jit_cases(PhiTest)

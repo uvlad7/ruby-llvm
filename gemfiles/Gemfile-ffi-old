@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+# CI resolves the newest ffi every time, so nothing exercises an older one. That matters for
+# LLVM.inject_llvm_libs, which reuses a single dlopen handle by reading ffi's @ffi_libs: if the
+# ivar ever differed, the single-handle guarantee would quietly degrade to per-binding ffi_lib
+# and reintroduce the split-libLLVM problem it exists to prevent.
+#
+# Pinned to the gemspec's floor exactly, so the lowest supported ffi is the one CI proves.
+source "https://rubygems.org"
+
+gemspec path: ".."
+
+gem "ffi", "1.16.0"

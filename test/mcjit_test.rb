@@ -5,6 +5,8 @@ require 'test_helper'
 
 class MCJITTestCase < Minitest::Test
   def setup
+    # builds an MCJIT engine directly rather than going through JIT_ENGINES
+    skip "MCJIT is unusable on #{FFI::Platform::ARCH}" unless mcjit_supported?
     LLVM.init_jit(true)
   end
 
@@ -73,16 +75,22 @@ class MCJITTestCase < Minitest::Test
   def test_accessors
     main_mod = LLVM::Module.new('main')
     engine = LLVM::MCJITCompiler.new(main_mod, :opt_level => 0)
-    assert_match(/^e-/, engine.data_layout.to_s)
+    # LLVM's data layout opens with the byte order: 'e' little-endian, 'E' big-endian. Assert
+    # the one this host actually is rather than assuming little-endian, which s390x is not.
+    endianness = [1].pack('L').unpack1('N') == 1 ? /\AE-/ : /\Ae-/
+    assert_match(endianness, engine.data_layout.to_s)
     matcher = case FFI::Platform::OS
     when 'darwin'
       /apple-darwin/
     when 'linux'
-      /gnu/
+      # the libc is part of the triple: -gnu on glibc, -musl on Alpine and friends
+      /linux-(gnu|musl)/
     when 'windows'
       /windows-gnu|windows-msvc/
     when 'cygwin'
       /windows-cygnus/
+    when 'freebsd'
+      /freebsd/
     else
       raise "New platform: #{FFI::Platform::OS}"
     end

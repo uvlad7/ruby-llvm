@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class CallTestCase < Minitest::Test
+module CallTestCase
   def setup
     LLVM.init_jit
   end
@@ -61,7 +61,7 @@ class CallTestCase < Minitest::Test
   end
 
   def test_external
-    register_libc_symbol_for_jit('abs')
+    register_jit_symbol('abs')
     test_module = define_module("test_module") do |host_module|
       external = host_module.functions.add("abs", [LLVM::Int], LLVM::Int)
       define_function(host_module, "test_function", [LLVM::Int], LLVM::Int) do |builder, function, *arguments|
@@ -74,7 +74,7 @@ class CallTestCase < Minitest::Test
   end
 
   def test_external_string
-    register_libc_symbol_for_jit('getenv')
+    register_jit_symbol('getenv')
     test_module = define_module("test_module") do |host_module|
       global = host_module.globals.add(LLVM::Array(LLVM::Int8, 5), "path")
       global.linkage = :internal
@@ -89,6 +89,39 @@ class CallTestCase < Minitest::Test
       end
     end
     assert_equal ENV.fetch("PATH", nil), run_function_on_module(test_module, "test_function").to_ptr.read_pointer.read_string
+  end
+
+  # JIT'd code calling into libruby, as ffi-llvm-jit's hello.rb does with
+  # rb_string_value_cstr. This is the long-branch case: libruby is mapped far from the page the
+  # JIT allocates, and on armv7 a BL reaches only +-32MB, so the engine has to emit a veneer
+  # rather than a direct branch. Getting that wrong crashes instead of failing an assertion,
+  # which is why it is worth exercising separately from the libc calls above -- libc is close
+  # enough that a direct branch can happen to work.
+  #
+  # rb_intern is the safest Ruby C API function to call from JIT'd code: it takes a C string,
+  # returns an ID, allocates no object and cannot raise.
+  def test_calls_into_libruby
+    ptr = process_symbol_pointer('rb_intern')
+    skip 'ruby is statically linked without exported symbols' unless ptr
+
+    LLVM::C.add_symbol(underscore_mangled_symbols? ? '_rb_intern' : 'rb_intern', ptr)
+    id_type = LLVM.const_get("Int#{FFI.type_size(:pointer) * 8}")
+
+    test_module = define_module("test_module") do |host_module|
+      name = host_module.globals.add(LLVM::Array(LLVM::Int8, 12), "sym_name")
+      name.linkage = :internal
+      name.initializer = LLVM::ConstantArray.string("ruby_llvm_x")
+      external = host_module.functions.add("rb_intern", [LLVM::Pointer(LLVM::Int8)], id_type)
+      define_function(host_module, "test_function", [], id_type) do |builder, function, *_args|
+        builder.position_at_end(function.basic_blocks.append)
+        builder.ret(builder.call(external, builder.gep(name, [LLVM::Int(0), LLVM::Int(0)])))
+      end
+    end
+
+    # The same call made directly through FFI: the JIT'd one must agree with it, which it can
+    # only do if the branch actually landed in libruby's rb_intern.
+    expected = FFI::Function.new(:ulong, [:string], ptr).call("ruby_llvm_x")
+    assert_equal expected, run_function_on_module(test_module, "test_function").to_i
   end
 
   def test_call_with_nonfunction
@@ -188,3 +221,5 @@ class CallTestCase < Minitest::Test
     # assert_equal 42, run_function_on_module(test_module, "caller_fun").to_i
   end
 end
+
+define_jit_cases(CallTestCase)

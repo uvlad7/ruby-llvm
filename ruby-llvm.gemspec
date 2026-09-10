@@ -22,7 +22,10 @@ Gem::Specification.new do |s|
 
   s.extra_rdoc_files = %w(README.md LICENSE)
 
-  s.add_dependency             'ffi',      '~> 1.13'
+  # 1.16.0 is the oldest ffi that works on the supported Rubies: FFI::DynamicLibrary
+  # .load_library, which the test suite uses to find libm, arrived there. Verified against
+  # Ruby 3.1 (the gemspec floor) -- 1.13.1 and 1.15.5 install fine but fail the suite.
+  s.add_dependency             'ffi',      '~> 1.16'
   s.add_dependency             'rake',     '>= 12', '< 14'
 
   s.add_development_dependency 'benchmark'

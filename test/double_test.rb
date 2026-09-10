@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class DoubleTestCase < Minitest::Test
+module DoubleTestCase
   def setup
     LLVM.init_jit
   end
@@ -88,17 +88,31 @@ class DoubleTestCase < Minitest::Test
       builder.ret(builder.fadd(p0, LLVM::Double(1.0)))
     end
 
-    engine = LLVM::MCJITCompiler.new(mod)
+    # sin lives in libm, which MCJIT does not search; register it before running.
+    register_jit_symbol("sin")
+    engine = jit_engine_for(mod)
 
     arg = 5.0
     function = mod.functions["test"] #: as !nil
     result = engine.run_function(function, arg)
     assert_equal arg + 1, result&.to_f(LLVM::Double)
 
-    skip 'MCJIT cannot find external function sin'
-
+    # sin is a declaration, not a definition. LLJIT resolves it through its process generator,
+    # so run_function works; MCJIT's getFunctionAddress does not find declarations by name, so
+    # go through the global's address instead.
     sin_function = mod.functions["sin"] #: as !nil
-    assert actual = engine.run_function(sin_function, 1.0)&.to_f(LLVM::Double)
+    actual =
+      if engine.is_a?(LLVM::LLJit)
+        engine.run_function(sin_function, 1.0)&.to_f(LLVM::Double)
+      else
+        ptr = engine.pointer_to_global(sin_function)
+        FFI::Function.new(:double, [:double], ptr).call(1.0)
+      end
+    assert actual
     assert_in_delta(Math.sin(1.0), actual, 1e-10)
+  ensure
+    engine&.dispose
   end
 end
+
+define_jit_cases(DoubleTestCase)

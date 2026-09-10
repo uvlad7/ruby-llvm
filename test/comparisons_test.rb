@@ -3,7 +3,7 @@
 
 require "test_helper"
 
-class ComparisonsTestCase < Minitest::Test
+module ComparisonsTestCase
   def setup
     LLVM.init_jit
   end
@@ -65,3 +65,5 @@ class ComparisonsTestCase < Minitest::Test
     end
   end
 end
+
+define_jit_cases(ComparisonsTestCase)

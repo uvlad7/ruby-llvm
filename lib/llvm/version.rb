@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 # typed: strict
 
+require 'rbconfig'
+
 module LLVM
   LLVM_VERSION = "22"
   LLVM_REQUIRED_VERSION = "22.1"
@@ -23,13 +25,17 @@ module LLVM
   #   libLLVM.so.22.1   Debian/Ubuntu layout since LLVM 19, and the real file on
   #                     current systems; added in ec556af to work around the
   #                     LLVM 19 packaging change.
-  #   LLVM-C            the MSVC build ships the C API as LLVM-C.dll, with no
-  #                     version in the name.
+  #   libLLVM-22.so.1   ELF soname some distributions ship for the versioned lib.
+  #   LLVM-C            the MSVC build ships the C API as LLVM-C.dll, with no version in the
+  #                     name. Appended only on mswin: everywhere else a versioned lib exists,
+  #                     and an unversioned entry would be a silent fallback to whatever LLVM
+  #                     happens to be installed. LLVM.assert_llvm_version! covers the mswin case.
   LIB_NAMES = [
     "LLVM-#{LLVM_VERSION}",
     "libLLVM-#{LLVM_VERSION}",
+    "libLLVM-#{LLVM_VERSION}.so.1",
     "libLLVM.so.#{LLVM_VERSION}",
     "libLLVM.so.#{LLVM_REQUIRED_VERSION}",
-    "LLVM-C",
+    *(RbConfig::CONFIG["host_os"].match?(/mswin/i) ? ["LLVM-C"] : []),
   ].freeze #: Array[String]
 end

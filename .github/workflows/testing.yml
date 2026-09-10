@@ -5,20 +5,39 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      JRUBY_OPTS: "-J-Xss4096k" # raise JVM stack so the recursive factorial sample doesn't overflow
     strategy:
       fail-fast: false
       matrix:
+        # riscv omitted until RVA23 runners land: ubuntu-26.04-riscv (RVA23/spacemit) isn't
+        # provisioned yet, and the available RVA20 ubuntu-24.04-riscv board SIGILLs on RVA23-only
+        # llvm-22 (Ubuntu 26.04) - no prebuilt rv64gc llvm-22 exists. Re-add ubuntu-26.04-riscv here
+        # once those boards are online; the riscv steps below already handle it.
         os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, ubuntu-26.04, macos-14, macos-15, macos-15-intel, macos-26, macos-26-intel, windows-2022, windows-2025]
         ruby: ['3.1', '3.2', '3.3', '3.4', '4.0']
         include:
           - os: windows-11-arm
             ruby: '3.4'
+          - os: windows-11-arm
+            ruby: '4.0'
           - os: windows-2025
             ruby: ruby-mswin
+          # jruby and truffleruby differ from CRuby in how they back FFI, not per-OS, so one
+          # linux and one macos each is the signal; the full cross-product is not worth 18 jobs.
+          - os: ubuntu-24.04
+            ruby: jruby-10.0
+          - os: ubuntu-24.04
+            ruby: truffleruby
+          - os: macos-15
+            ruby: jruby-10.0
+          - os: macos-15
+            ruby: truffleruby
         exclude:
           - os: ubuntu-26.04
             ruby: '3.1'
@@ -36,6 +55,46 @@ jobs:
       # the windows path calls `ridk exec` to install LLVM into the MSYS2 tree of
       # whichever Ruby setup-ruby just installed, so Ruby has to exist first.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # ruby/setup-ruby has no riscv64 prebuilts, so build Ruby with ruby-build and cache it in
+      # the tool cache where setup-ruby then finds it (same approach as ffi-llvm-jit).
+      - if: contains(matrix.os, '-riscv')
+        name: Restore Ruby cache (riscv64)
+        id: ruby-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.tool_cache }}/Ruby
+          key: ruby-${{ matrix.os }}-${{ matrix.ruby }}
+      - if: contains(matrix.os, '-riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: rbenv/ruby-build
+          ref: v20260520
+          path: tmp/ruby-build
+      - if: contains(matrix.os, '-riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Build Ruby (riscv64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf bison patch build-essential libssl-dev libyaml-dev \
+            libreadline-dev zlib1g-dev libgmp-dev libffi-dev
+          sudo ./tmp/ruby-build/install.sh
+          RUBY_EXACT=$(ruby-build --definitions | grep -E "^${{ matrix.ruby }}\." | sort -V | tail -1)
+          [ -n "${RUBY_EXACT}" ] || { echo "No ruby-build definition for Ruby ${{ matrix.ruby }}"; exit 1; }
+          ruby-build "${RUBY_EXACT}" "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64"
+          touch "${RUNNER_TOOL_CACHE}/Ruby/${RUBY_EXACT}/riscv64.complete"
+      - if: contains(matrix.os, '-riscv') && steps.ruby-cache.outputs.cache-hit != 'true'
+        name: Save Ruby cache (riscv64)
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.tool_cache }}/Ruby
+          key: ruby-${{ matrix.os }}-${{ matrix.ruby }}
+      # JRuby 10 is compiled for Java 21 (class file 65); the runners default to 17, which
+      # fails with UnsupportedClassVersionError before setup-ruby can even start it.
+      - if: startsWith(matrix.ruby, 'jruby')
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: ${{ matrix.ruby }}
@@ -77,10 +136,16 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           echo "setup=false" >> "$GITHUB_OUTPUT"
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 22
-          # sudo apt-get install -y libpolly-22-dev
+          if [[ '${{ matrix.os }}' == *riscv* ]]; then
+            # apt.llvm.org has no riscv64 repo; Ubuntu 26.04 (resolute) packages llvm-22 for riscv64.
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends llvm-22-dev clang-22
+          else
+            wget https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh 22
+            # sudo apt-get install -y libpolly-22-dev
+          fi
           echo "setup=true" >> "$GITHUB_OUTPUT"
       - name: Install LLVM on windows
         id: windows_setup
@@ -151,3 +216,282 @@ jobs:
         # sorbet-static has no Windows build (see Gemfile), so windows_setup is
         # deliberately omitted here, unlike the steps above
         if: steps.macos_setup.outputs.setup == 'true' || steps.ubuntu_setup.outputs.setup == 'true'
+
+  # Cygwin is its own platform, not a Windows one: POSIX paths, its own libc (cygwin1.dll), and
+  # its own ruby. Not reachable from the matrix above, which drives ruby/setup-ruby.
+  test-cygwin:
+    runs-on: windows-2025
+    # Cygwin's slow fork/exec makes gem installs crawl; cap it so a stall can't run for hours.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cygwin/cygwin-install-action@v6
+        with:
+          # llvm/clang 22.x are only in Cygwin's test channel (stable tops out at 20.x). Cygwin
+          # setup matches the exact version-release (no major.minor pinning), so pin each:
+          # LLVM 22.1.8 (clang's Cygwin revision is -2, the rest -1) and Ruby 4.0.6-1.
+          # pkg-config lets ffi find the system libffi instead of doing a slow bundled build.
+          allow-test-packages: true
+          packages: >-
+            ruby=4.0.6-1, ruby-devel=4.0.6-1, rubygems, llvm=22.1.8-1, libllvm-devel=22.1.8-1,
+            clang=22.1.8-2, gcc-core, gcc-g++, make, libffi-devel, pkg-config, git
+      - name: "Build + test"
+        shell: C:\cygwin\bin\bash.exe --login -o igncr '{0}'
+        run: |
+          # The runner's preinstalled Windows Ruby (hostedtoolcache) leaks into the Cygwin shell and
+          # shadows Cygwin's ruby/bundle (bundle exec then re-execs the wrong ruby → LoadError).
+          # Strip any ruby-named PATH entry, the same way ruby/setup-ruby does.
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -viE '\bruby\b' | paste -sd:)"
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")"
+          export OPT=opt
+          bundle config set --local build.ffi --enable-system-libffi
+          bundle install --jobs 4
+          (cd ext/ruby-llvm-support && bundle exec rake)
+          bundle exec rake
+          bundle exec rake test:samples
+
+  # Distro containers cover the libc/word-size axes the hosted runners cannot: musl, and 32-bit
+  # x86. Each installs the distro's own llvm-22 rather than apt.llvm.org, so the bindings are
+  # exercised against however that distro packaged it.
+  # x86 containers execute natively, so these are cheap enough to run on every PR.
+  test-container:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # musl: a different libc, and the one most likely to expose assumptions about glibc.
+          - {label: 'Alpine musl x86_64', image: 'alpine:edge', platform: 'linux/amd64'}
+          # 32-bit x86: half-width pointers, and the i386 ABI the JIT stack-realign work targets.
+          - {label: 'Debian glibc i386', image: 'i386/debian:testing', platform: 'linux/386'}
+          # musl on 32-bit, so the two axes meet rather than only being covered separately.
+          - {label: 'Alpine musl i386', image: 'i386/alpine:edge', platform: 'linux/386'}
+    name: ${{ matrix.label }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Enable qemu for non-native platforms
+        if: matrix.platform != 'linux/amd64'
+        uses: docker/setup-qemu-action@v3
+      - name: Build + test
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} -v "$GITHUB_WORKSPACE":/w -w /w \
+            ${{ matrix.image }} sh -euxc '
+              if command -v apk >/dev/null; then
+                apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
+                # Alpine names opt "opt22" (no dash), so the default OPT (opt-22) misses.
+                export OPT=opt22
+              else
+                apt-get update
+                apt-get install -y --no-install-recommends ruby ruby-dev build-essential \
+                  llvm-22 llvm-22-dev libclang-common-22-dev libffi-dev git ca-certificates
+                export OPT=opt-22
+              fi
+              command -v bundle >/dev/null || gem install bundler --no-document
+              # Debian ships a rubygems too old for the precompiled ffi gem; build it from source.
+              bundle config set --local force_ruby_platform true
+              bundle install
+              (cd ext/ruby-llvm-support && bundle exec rake)
+              bundle exec rake
+              bundle exec rake test:samples
+            '
+
+  # qemu-emulated, so minutes-per-job rather than seconds. Skipped on pull requests; runs on
+  # pushes to master and on manual dispatch.
+  test-container-emulated:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {label: 'Debian glibc armv7', image: 'arm32v7/debian:testing', platform: 'linux/arm/v7'}
+          # armv7 on both libcs: the JIT behaves differently across them. MCJIT hangs on musl
+          # armv7 (see mcjit_supported?) while the same suite passes on glibc armv7, so testing
+          # only one of the two would have missed it entirely.
+          - {label: 'Alpine musl armv7', image: 'arm32v7/alpine:edge', platform: 'linux/arm/v7'}
+          - {label: 'Debian glibc ppc64le', image: 'ppc64le/debian:testing', platform: 'linux/ppc64le'}
+          # The only big-endian target here: byte order shows up in FFI struct packing and in
+          # how IR constants are laid out, and nothing else in this matrix would catch it.
+          # sparc64 would do as well but cannot run: qemu binfmt (tonistiigi/binfmt) has no
+          # sparc64, and the NetBSD/OpenBSD VMs that do offer it carry pkgsrc LLVM 19, not 22.
+          - {label: 'Debian glibc s390x (big-endian)', image: 's390x/debian:testing', platform: 'linux/s390x'}
+    name: ${{ matrix.label }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@v3
+      - name: Build + test
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} -v "$GITHUB_WORKSPACE":/w -w /w \
+            ${{ matrix.image }} sh -euxc '
+              if command -v apk >/dev/null; then
+                apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
+                # Alpine names opt "opt22" (no dash), so the default OPT (opt-22) misses.
+                export OPT=opt22
+              else
+                apt-get update
+                apt-get install -y --no-install-recommends ruby ruby-dev build-essential \
+                  llvm-22 llvm-22-dev libclang-common-22-dev libffi-dev git ca-certificates
+                export OPT=opt-22
+              fi
+              command -v bundle >/dev/null || gem install bundler --no-document
+              bundle config set --local force_ruby_platform true
+              bundle install
+              (cd ext/ruby-llvm-support && bundle exec rake)
+              bundle exec rake
+              bundle exec rake test:samples
+            '
+
+  # An older ffi than the resolver would pick, to keep LLVM.inject_llvm_libs honest: it reuses a
+  # single dlopen handle by reading ffi's @ffi_libs, so a change there must fail loudly rather
+  # than silently degrading to per-binding ffi_lib.
+  test-ffi-old:
+    runs-on: ubuntu-24.04
+    env:
+      # absolute: the support-library step cds into ext/ruby-llvm-support, and a relative
+      # BUNDLE_GEMFILE would be resolved from there
+      BUNDLE_GEMFILE: ${{ github.workspace }}/gemfiles/Gemfile-ffi-old
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install LLVM
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+      # quoted: an unquoted '#' would start a YAML comment and truncate the command
+      - name: "Confirm the pin took"
+        run: bundle exec ruby -e 'require "ffi"; abort("wrong ffi " + FFI::VERSION) unless FFI::VERSION == "1.16.0"'
+      - run: cd ext/ruby-llvm-support && bundle exec rake
+        name: "Build support library"
+      - run: bundle exec rake
+        name: "Run tests"
+
+  # FreeBSD is not a hosted runner; cross-platform-actions boots a VM image.
+  test-freebsd:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build + test on FreeBSD
+        uses: cross-platform-actions/action@v0.27.0
+        with:
+          operating_system: freebsd
+          version: '14.2'
+          run: |
+            sudo pkg install -y ruby devel/ruby-gems llvm22 libffi gmake pkgconf git
+            # FreeBSD installs LLVM under /usr/local/llvm22, off PATH.
+            export PATH="/usr/local/llvm22/bin:$PATH"
+            export OPT=opt
+            command -v bundle >/dev/null || sudo gem install bundler --no-document
+            # the system gem dir is root-owned; keep the bundle in-tree instead
+            bundle config set --local path vendor/bundle
+            bundle install
+            (cd ext/ruby-llvm-support && bundle exec rake)
+            bundle exec rake
+            bundle exec rake test:samples
+
+  # llvm-22 on the RVA20 riscv runner via rv64gc distro containers (Ubuntu 26.04 is RVA23 -> SIGILL).
+  # Both openSUSE (glibc) and Alpine (musl) ship llvm-22 for riscv64 built rv64gc. Run via
+  # `docker run --platform linux/riscv64` (forces the riscv64 image; checkout stays on the host).
+  test-riscv-opensuse:
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    runs-on: ubuntu-24.04-riscv
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build + test in openSUSE Tumbleweed (glibc, llvm 22)
+        run: |
+          docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w opensuse/tumbleweed bash -euxc '
+            # the tumbleweed image snapshot lags the rolling repo, so refresh metadata first or the
+            # freshly-added llvm22 packages are "not found".
+            zypper -n --gpg-auto-import-keys ref
+            zypper -n install ruby ruby-devel gcc-c++ make libffi-devel llvm22 llvm22-devel
+            # openSUSE installs versioned binaries on PATH (/usr/bin/llvm-config-22, opt-22), which
+            # find_llvm_config and the default OPT (opt-22) already pick up - no PATH/OPT tweak needed.
+            command -v bundle >/dev/null || gem install bundler --no-document
+            bundle install
+            (cd ext/ruby-llvm-support && bundle exec rake)
+            bundle exec rake
+            bundle exec rake test:samples
+          '
+
+  test-riscv-alpine:
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    runs-on: ubuntu-24.04-riscv
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build + test in Alpine edge (musl, llvm 22)
+      # TODO: ensure all runs fail if one of the commands fails
+        run: |
+          docker run --rm --platform linux/riscv64 -v "$GITHUB_WORKSPACE":/w -w /w alpine:edge sh -euxc '
+            apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
+            # Alpine puts versioned tools on PATH (/usr/bin/llvm-config-22 -> found by find_llvm_config),
+            # but names opt "opt22" (no dash), so the default OPT (opt-22) misses - set it explicitly.
+            export OPT=opt22
+            command -v bundle >/dev/null || gem install bundler --no-document
+            bundle install
+            (cd ext/ruby-llvm-support && bundle exec rake)
+            bundle exec rake
+            bundle exec rake test:samples
+          '
+
+  # EXPERIMENT, remove once it has answered: does MCJIT fail on riscv64 for the same reason
+  # LLJIT does?
+  #
+  # MCJIT is skipped on riscv64 on the strength of a comment saying RuntimeDyld "mis-relocates
+  # globals". LLJIT, which does run there, fails on four compiler-rt builtins that neither engine
+  # can reach (__muldi3, __addsf3, __adddf3, __floatunsisf -- they live in libgcc.a, not in any
+  # shared object). An unresolved symbol read as null looks exactly like a mis-relocated global,
+  # so the two explanations may be one.
+  #
+  # RL_FORCE_MCJIT=1 lifts the skip. What matters is WHICH tests fail:
+  #   - the same float and 64-bit-multiply ones LLJIT fails  -> one cause, and the comment is wrong
+  #   - different ones, e.g. global access                   -> the original diagnosis stands
+  #
+  # continue-on-error, since it is expected to fail either way.
+  test-riscv-mcjit-probe:
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    runs-on: ubuntu-24.04-riscv
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Probe MCJIT on riscv64 (Alpine, musl, llvm 22)
+        run: |
+          docker run --rm --platform linux/riscv64 -e RL_FORCE_MCJIT=1 \
+            -v "$GITHUB_WORKSPACE":/w -w /w alpine:edge sh -euxc '
+              apk add --no-cache ruby ruby-dev build-base llvm22 llvm22-dev libffi-dev
+              export OPT=opt22
+              command -v bundle >/dev/null || gem install bundler --no-document
+              bundle install
+              (cd ext/ruby-llvm-support && bundle exec rake)
+              # only the JIT-executing suites; the point is which of them break
+              bundle exec rake test || true
+              echo "--- where is the compiler runtime on this image? ---"
+              find / -name "libgcc*.a" -o -name "libclang_rt.builtins*" 2>/dev/null | head
+            '
+
+# Still uncovered here, and why:
+#
+# - sparc64: qemu binfmt (tonistiigi/binfmt) has no sparc64 emulator, and the NetBSD/OpenBSD VMs
+#   that do offer it carry pkgsrc LLVM 19. s390x provides the big-endian coverage instead.
+# - msys proper, as opposed to the mingw64 toolchain the matrix already uses.
+#
+# TODO: the following are blocked on THIS branch by its LLVM 22 requirement, not by the platform,
+# so they belong on the older version branches where the toolchain exists:
+#
+# - riscv64 as a direct matrix job (ubuntu-26.04-riscv). The RVA23 boards are not provisioned and
+#   the available RVA20 ubuntu-24.04-riscv board SIGILLs on RVA23-only llvm-22, so riscv64 runs
+#   here only through the rv64gc distro containers below. On llvm-21 and earlier there is a
+#   prebuilt rv64gc toolchain, so the direct job works there.
+# - mingw32 and cygwin-32: no 32-bit ruby in setup-ruby or cygwin-install-action, and both cap at
+#   LLVM 21 regardless -- llvm-21 branch.
+#
+# Alpine (musl) is covered on x86_64, i386, armv7 and riscv64; see test-container,
+# test-container-emulated and test-riscv-alpine.

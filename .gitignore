@@ -20,3 +20,4 @@ Gemfile.lock
 lib/llvm/config.rb
 # from find_executable("opt") in tests
 /mkmf.log
+gemfiles/*.lock
